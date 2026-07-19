@@ -342,7 +342,186 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
 
 ---
 
-## 4. Definition of Done (per minor phase)
+## 4. Long-Run Training & Resilience
+
+*Core principle: training runs on the Oracle VM. The Mac is a remote control — it can sleep, shut down, or be reformatted mid-run without affecting the process. SSH is just a remote terminal; the only thing that kills the run is something happening to the Oracle VM itself (reboot, OOM, disk full, crash). The infrastructure below is designed so that even those events are recoverable without the operator being present.*
+
+### 4.1 Why not tmux (or nohup)?
+
+`tmux` and `nohup ... &` only solve the **SSH-disconnect** problem. They do **nothing** for:
+
+- Oracle reboot (kernel updates, host maintenance)
+- OOM kill
+- Training crash (NaN loss, segfault, CUDA error)
+- Disk full mid-shard
+- A bug that crashes the process 3 seconds after start (loops forever)
+
+For any multi-hour run we use **`systemd`**, which is built for "run this forever, restart on failure, resume from where you stopped." tmux/nohup are acceptable only for runs shorter than ~1 hour.
+
+### 4.2 Canonical training systemd unit
+
+File: `/etc/systemd/system/minigpt-train.service`
+
+```ini
+[Unit]
+Description=minigpt training (phase N)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/minigpt_llm
+ExecStart=/opt/minigpt_llm/.venv/bin/python -m training.train \
+    --config configs/<run>.yaml \
+    --data-dir /data/tokenized \
+    --out-dir /opt/minigpt_llm/checkpoints/<run> \
+    --resume latest
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=10
+StartLimitIntervalSec=600
+OOMScoreAdjust=-500
+# Refuse to start if /data is > 95% full (we'd just OOM/crash anyway)
+ExecStartPre=/bin/sh -c 'df -h /data | awk "NR==2 && $5+0 < 95" | grep -q .'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minigpt-train
+ExecStopPost=/opt/minigpt_llm/scripts/notify_done.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now minigpt-train
+```
+
+### 4.3 Observability stack (no terminal required)
+
+| Question | Command (run from your Mac) |
+|---|---|
+| Is it running? | `ssh oracle 'systemctl is-active minigpt-train'` |
+| Last 50 log lines | `ssh oracle 'journalctl -u minigpt-train -n 50 --no-pager'` |
+| Current step / loss / GPU / disk | `ssh oracle 'cat /opt/minigpt_llm/STATUS.json'` |
+| How many times has it crashed since start? | `ssh oracle 'systemctl show minigpt-train -p NRestarts'` |
+| Loss curves in a browser | `ssh -L 6006:localhost:6006 oracle` → `http://localhost:6006` |
+
+### 4.4 Heartbeat (cron, every 5 min)
+
+`/opt/minigpt_llm/scripts/heartbeat.sh`:
+```bash
+#!/bin/bash
+LOG=/opt/minigpt_llm/logs/phase3/run.log
+STEP=$(grep -oP 'step=\K\d+' "$LOG" | tail -1)
+LOSS=$(grep -oP 'loss=\K[0-9.]+' "$LOG" | tail -1)
+GPU=$(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader 2>/dev/null || echo "n/a")
+DISK=$(df -h /data | tail -1 | awk '{print $5}')
+cat > /opt/minigpt_llm/STATUS.json <<EOF
+{"step":${STEP:-0},"loss":${LOSS:-null},"gpu":"${GPU}","disk":"${DISK}","ts":"$(date -Iseconds)"}
+EOF
+```
+
+Crontab entry:
+```
+*/5 * * * * /opt/minigpt_llm/scripts/heartbeat.sh
+```
+
+`STATUS.json` is the single source of truth for "is the run healthy?" — readable from any device with SSH.
+
+### 4.5 Push notifications (ntfy.sh — free, no account)
+
+Install the **ntfy** app on your phone (Android/iOS), subscribe to a secret topic, then wire it in:
+
+```bash
+WEBHOOK="https://ntfy.sh/<your-secret-topic>"
+notify() { curl -s -d "$1" "$WEBHOOK" >/dev/null; }
+```
+
+Wire points:
+- `ExecStopPost=/opt/minigpt_llm/scripts/notify_done.sh` in the systemd unit → fires on clean exit or systemd restart-then-give-up.
+- `trap 'notify "minigpt: training crashed step=${STEP:-?} loss=${LOSS:-?}"' ERR` in the training wrapper → fires on any non-zero exit.
+- Heartbeat cron: if `step` hasn't advanced in 6 consecutive runs, fire a "stuck" alert.
+
+Fallback (no phone signal): `echo "minigpt: training done" | mail -s "minigpt" you@gmail.com`.
+
+### 4.6 Failure-mode matrix
+
+| Failure | Without systemd (bare `python ...` over SSH) | With systemd unit |
+|---|---|---|
+| SSH drops / Mac sleeps | dies (unless tmux/nohup) | survives |
+| Mac shut down / reformatted | dies (unless tmux/nohup) | survives |
+| Oracle reboots (host maintenance) | dies | auto-restarts after boot, `--resume` from last checkpoint |
+| Training crash (OOM, NaN, CUDA error) | dies | auto-restarts after 30s, `--resume` |
+| Disk full on `/data` | crashes silently mid-shard | `ExecStartPre` refuses to start, alert fires |
+| Kernel OOM-kills the process | dies | `OOMScoreAdjust=-500` makes us less likely to be killed; if we are, systemd restarts cleanly |
+| Bug loops (crash within 10s of start, forever) | infinite tight loop | `StartLimitBurst=10` per 600s → systemd gives up, alert fires |
+| `fineweb.bin` write gets interrupted | corrupt shard | atomic write + re-validate on next start |
+
+### 4.7 Checkpoint + `--resume` contract
+
+- `train.py --resume latest` always restarts from `checkpoints/<run>/latest.pt`.
+- `checkpoints/<run>/` lives on the **boot volume** (not `/data`); survives reboots and re-attachments.
+- `latest.pt` is updated atomically (`.tmp` → `rename`) every N steps (default 1000). Power loss mid-write ≠ corrupt checkpoint.
+- Best-by-val-loss checkpoint is kept separately as `best.pt`.
+- Keep the last 3 `latest` snapshots to recover from a single corrupted write.
+- Every 4h: snapshot `best.pt` to Oracle Object Storage (free egress) via `rclone`. Off-host backup of the thing you cannot rebuild.
+
+### 4.8 TensorBoard service (browser-based loss curves)
+
+`/etc/systemd/system/minigpt-tb.service`:
+```ini
+[Unit]
+Description=TensorBoard for minigpt
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+ExecStart=/opt/minigpt_llm/.venv/bin/tensorboard \
+    --logdir /opt/minigpt_llm/logs --host 0.0.0.0 --port 6006
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now minigpt-tb
+```
+
+Access from your laptop: `ssh -L 6006:localhost:6006 oracle` → `http://localhost:6006`. Phone-friendly too if you keep the tunnel open in Termius/BlinkShell.
+
+### 4.9 Pre-flight checklist before any run > 1 hour
+
+Before kicking off a long training run, the operator (or agent) MUST verify:
+
+1. A `<run>.service` unit exists at `/etc/systemd/system/minigpt-<run>.service`.
+2. `systemctl enable --now minigpt-<run>` returns 0.
+3. `systemctl is-active minigpt-<run>` returns `active` after 60s.
+4. `cat /opt/minigpt_llm/STATUS.json` updates within 5 min.
+5. `journalctl -u minigpt-<run> -n 5` shows expected boot output (model loaded, dataset opened, step 1 logged).
+6. ntfy topic is configured and a test notification (`notify "test"`) arrives on the phone.
+7. `checkpoints/<run>/` exists and is writable.
+
+If any of these fail, **do not walk away.** Fix first.
+
+### 4.10 The rule for the next agent
+
+Do not start a multi-hour training run inside a plain `ssh oracle && python ...` command. That is a footgun. Always:
+1. Write a `<run>.service` unit.
+2. `systemctl enable --now <run>.service`.
+3. Run the §4.9 pre-flight checklist.
+4. Disconnect.
+
+For runs under 1 hour, `tmux` or `nohup ... &` is fine and does not require a unit file. The threshold is "would I be annoyed if this died and I had to restart it from scratch?"
+
+---
+
+## 5. Definition of Done (per minor phase)
 
 A minor phase is "done" only when:
 
@@ -355,19 +534,19 @@ A minor phase is "done" only when:
 
 ---
 
-## 5. Handoff Protocol (end of an agent's turn)
+## 6. Handoff Protocol (end of an agent's turn)
 
 Before ending any turn, an agent must:
 
 1. Update todos (the live `TodoWrite` list reflects only current work; this file is the long-term ledger).
 2. Flip status markers in §2 for completed minor phases.
-3. Run the §4 Definition-of-Done checklist mentally; fix any red items.
+3. Run the §5 Definition-of-Done checklist mentally; fix any red items.
 4. If blocked, write a one-line `## Blocked on <X>` note at the bottom of this file (keep it; remove when unblocked).
 5. Leave a short summary message in chat: "Done: <phases>. Next: <phase>. Blocked: <…>."
 
 ---
 
-## 6. Phase Dependency Graph (textual)
+## 7. Phase Dependency Graph (textual)
 
 ```
 0 (Foundation)
