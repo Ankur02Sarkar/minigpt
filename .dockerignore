@@ -22,6 +22,5 @@ data/
 .ipynb_checkpoints/
 Dockerfile*
 docker-compose*
-README.md
 ARCHITECTURE.md
 AGENTS.md
