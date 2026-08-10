@@ -64,34 +64,34 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 0 — Foundation & Infra (Azure bootstrap)
 *Goal: a reproducible, on-Azure dev environment with `/data` mounted and the repo running in Docker. Two VMs: B2ms for prep, NC8as_T4_v3 for training.*
 
-- **0.1 Create Azure resource group + managed data disk** `[ ]`
+- **0.1 Create Azure resource group + managed data disk** `[x]`
   - `az group create --name minigpt-rg --location eastus`.
   - `az disk create --resource-group minigpt-rg --name minigpt-data --size-gb 64 --sku StandardSSD_LRS`.
   - The data disk is portable — it will move between B2ms and T4 VMs.
-- **0.2 Provision B2ms prep VM** `[ ]`
+- **0.2 Provision B2ms prep VM** `[x]`
   - `az vm create --resource-group minigpt-rg --name minigpt-prep --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_B2ms --admin-username ubuntu --ssh-key-values ~/.ssh/id_ed25519.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
   - Attach the data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
   - Configure NSG: open 22, 8080, 11434 only to your IP.
   - Generate + upload SSH key; disable password auth.
-- **0.3 Format + mount the data disk on B2ms** `[ ]`
+- **0.3 Format + mount the data disk on B2ms** `[x]`
   - `sudo parted /dev/sdc --script mklabel gpt mkpart primary ext4 0% 100%`.
   - `sudo mkfs.ext4 /dev/sdc1 && sudo mkdir -p /data`.
   - `echo '/dev/sdc1 /data ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab && sudo mount -a`.
   - Verify with `df -h /data` and a `fio` smoke test (≥ 50 IOPS read, ≥ 50 IOPS write on Standard SSD).
-- **0.4 Install system packages on the B2ms instance** `[ ]`
+- **0.4 Install system packages on the B2ms instance** `[x]`
   - `git`, `build-essential`, `python3.12`, `python3.12-venv`, `docker.io`, `docker-compose-plugin`, `htop`, `tmux`, `unzip`.
   - Add the `ubuntu` user to the `docker` group; `newgrp docker`.
-- **0.5 Clone the repo and pin Python env** `[ ]`
+- **0.5 Clone the repo and pin Python env** `[x]`
   - `git clone git@github.com:<org>/minigpt_llm.git /opt/minigpt_llm`.
   - `python3.12 -m venv .venv && source .venv/bin/activate`.
   - `pip install -U pip uv && uv pip install -r requirements.txt -r requirements-dev.txt`.
-- **0.6 Build the base Docker image** `[ ]`
+- **0.6 Build the base Docker image** `[x]`
   - `docker build -f docker/Dockerfile.base -t minigpt/base:latest .`.
   - Tag with the git SHA: `docker tag minigpt/base:latest minigpt/base:$SHA`.
-- **0.7 Pre-commit + CI bootstrap** `[ ]`
+- **0.7 Pre-commit + CI bootstrap** `[x]`
   - `.pre-commit-config.yaml`, `.github/workflows/ci.yml` (lint + typecheck + test on PR).
   - Branch protection on `main`: require CI green + 1 review.
-- **0.8 README "Quickstart" skeleton** `[ ]`
+- **0.8 README "Quickstart" skeleton** `[x]`
   - Badges (CI, license, python, docker), 1-paragraph elevator pitch, 5-line "what is this", 1 `curl` example.
   - Filled out properly in Phase 7 once endpoints exist.
 

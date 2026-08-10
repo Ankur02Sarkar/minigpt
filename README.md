@@ -54,7 +54,7 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 
 | Major Phase | Minor Phases | Completed | Status |
 |---|---|---|---|
-| Phase 0 — Foundation & Infra | 8 | 0 | 🔄 In Progress |
+| Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
 | Phase 1 — Data Pipeline | 10 | 0 | ⏳ Pending |
 | Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending |
 | Phase 3 — Training Engine | 9 | 0 | ⏳ Pending |
@@ -62,45 +62,63 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **0** | |
+| **Total** | **62** | **8** | |
 
-### Phase 0 — Foundation & Infra (Current)
+### Phase 0 — Foundation & Infra (✅ Complete)
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 0.1 | Create Azure resource group + managed data disk | ⏳ | Next: `az group create`, `az disk create` |
-| 0.2 | Provision B2ms prep VM | ⏳ | SSH key ready (`~/.ssh/id_ed25519`), quota approved (BS: 0/10, NCASv3_T4: 0/8, Total vCPU: 0/18) |
-| 0.3 | Format + mount `/data` on B2ms | ⏳ | |
-| 0.4 | Install system packages on B2ms | ⏳ | git, python3.12, docker, htop, tmux, unzip |
-| 0.5 | Clone repo + pin Python env | ⏳ | Repo skeleton created locally; needs push + clone on VM |
-| 0.6 | Build Docker base image | ⏳ | `docker/Dockerfile.base` created |
-| 0.7 | Pre-commit + CI bootstrap | ⏳ | `.pre-commit-config.yaml` + `.github/workflows/ci.yml` created |
+| 0.1 | Create Azure resource group + managed data disk | ✅ | `minigpt-rg` in eastus, 64 GB Standard SSD in zone 1 |
+| 0.2 | Provision B2ms prep VM | ✅ | `minigpt-prep` in zone 1, SSH key ed25519, NSG: 22/8080/11434 to 49.37.169.202 |
+| 0.3 | Format + mount `/data` on B2ms | ✅ | ext4 on /dev/sdc1, 63 GB usable, fstab entry with nofail |
+| 0.4 | Install system packages on B2ms | ✅ | git, python3.12 (deadsnakes PPA), docker CE, build-essential, htop, tmux, unzip |
+| 0.5 | Clone repo + pin Python env | ✅ | Cloned to /opt/minigpt_llm, uv venv with all deps, torch 2.13.0+cu130 |
+| 0.6 | Build Docker base image | ✅ | `minigpt/base:latest` (9.03 GB), tagged `minigpt/base:545a5c2` |
+| 0.7 | Pre-commit + CI bootstrap | ✅ | `.pre-commit-config.yaml` + `.github/workflows/ci.yml` created |
 | 0.8 | README "Quickstart" skeleton | ✅ | This file |
 
-### Local repo setup (Track B — partial Phase 0 work done locally)
+**Exit criteria verified:**
+- `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` → `2.13.0+cu130` ✅
+- `df -h /data` → 63 GB mounted ✅
+
+### Local repo setup (Track B — ✅ Complete)
 
 | # | Task | Status |
 |---|---|---|
 | B1 | `.gitignore` expanded | ✅ |
 | B2 | Project skeleton created (`minigpt_llm/`, `training/`, `serving/`, `inference/`, `configs/`, `docker/`, `scripts/`, `tests/`, `docs/`, `.github/`) | ✅ |
 | B3 | `pyproject.toml`, `requirements.txt`, `requirements-dev.txt` created | ✅ |
-| B4 | Local venv with `uv` | ⏳ |
+| B4 | Local venv with `uv` | ✅ |
 | B5 | `.pre-commit-config.yaml` created | ✅ |
 | B6 | `.github/workflows/ci.yml` created | ✅ |
 | B7 | `docker/Dockerfile.base` created | ✅ |
 | B8 | README.md skeleton + progress tracker | ✅ |
-| B9 | AGENTS.md `id_rsa` → `id_ed25519` | ⏳ |
+| B9 | AGENTS.md `id_rsa` → `id_ed25519` | ✅ |
 
-### Azure environment (Track A — not yet started)
+### Azure environment (Track A — ✅ Complete)
 
 | # | Task | Status |
 |---|---|---|
-| A1 | Create resource group `minigpt-rg` + 64 GB managed data disk | ⏳ |
-| A2 | Provision B2ms prep VM + attach disk + NSG rules | ⏳ |
-| A3 | Format + mount `/data` on B2ms | ⏳ |
-| A4 | Install system packages on B2ms | ⏳ |
-| A5 | Clone repo + uv venv on B2ms VM | ⏳ |
-| A6 | Build Docker base image on B2ms + verify exit criteria | ⏳ |
+| A1 | Create resource group `minigpt-rg` + 64 GB managed data disk | ✅ |
+| A2 | Provision B2ms prep VM + attach disk + NSG rules | ✅ |
+| A3 | Format + mount `/data` on B2ms | ✅ |
+| A4 | Install system packages on B2ms | ✅ |
+| A5 | Clone repo + uv venv on B2ms VM | ✅ |
+| A6 | Build Docker base image on B2ms + verify exit criteria | ✅ |
+
+### Next: Phase 1 — Data Pipeline (on B2ms)
+
+Phase 1 runs entirely on the cheap B2ms VM. It involves:
+1. Download TinyStories + WikiText-103 raw datasets
+2. Stream FineWeb-Edu (capped at 500M tokens)
+3. Clean + dedupe
+4. Train BPE tokenizer (32k vocab)
+5. Tokenize all corpora → `.bin` shards
+6. Train/val split
+7. Data-loader smoke test
+8. Move data disk to T4 VM
+
+**Before starting Phase 1:** Deallocate the T4 VM budget — Phase 1 is all CPU work on B2ms.
 
 ---
 
@@ -109,14 +127,16 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | Resource | Value |
 |---|---|
 | Azure subscription | "Azure subscription 1" (free trial, $200 credit) |
-| Resource group | `minigpt-rg` (eastus) — not yet created |
-| Prep VM | `minigpt-prep` (Standard_B2ms, ~$0.083/hr) — not yet created |
-| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, ~$0.752/hr) — not yet created |
-| Data disk | `minigpt-data` (64 GB Standard SSD, portable between VMs) — not yet created |
+| Resource group | `minigpt-rg` (eastus) ✅ |
+| Prep VM | `minigpt-prep` (Standard_B2ms, zone 1, ~$0.083/hr) — IP: 172.178.112.133 ✅ |
+| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, ~$0.752/hr) — not yet created (Phase 1.10) |
+| Data disk | `minigpt-data` (64 GB Standard SSD, zone 1, portable) — attached to prep VM ✅ |
 | SSH key | `~/.ssh/id_ed25519` (ed25519, no passphrase) |
-| Public IP (for NSG) | `49.37.169.202` |
+| SSH config | `Host azure-prep` → 172.178.112.133 |
+| Public IP (for NSG) | `49.37.169.202` (ports 22, 8080, 11434 open) |
 | Quota | NCASv3_T4: 0/8 ✓, BS Family: 0/10 ✓, Total Regional vCPUs: 0/18 ✓ |
 | Budget target | $35-50 (within $200 free-trial credit) |
+| Docker base image | `minigpt/base:latest` (9.03 GB, torch 2.13.0+cu130) ✅ |
 
 ---
 
