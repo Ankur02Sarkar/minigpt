@@ -9,8 +9,8 @@ This file is the **source of truth for how work gets done** on this project: eve
 ## 0. Global Rules (apply to every phase)
 
 1. **Microsoft Azure is the only platform that touches data.** No dataset is downloaded, stored, cleaned, or tokenized on the MacBook. The Mac is a thin client: editor + `git` + `ssh` + `az` CLI.
-2. **$200 free-trial credit is the hard ceiling — no pay-as-you-go.** Target spend is $50–70. The project must complete within 30 days or before credits run out, whichever comes first. Managed disks persist through VM deallocate — you never lose data by pausing.
-3. **Two-VM strategy.** A cheap `Standard_B2ms` (~$0.08/hr) does all CPU-bound data prep. A `Standard_NC8as_T4_v3` (~$1.120/hr, 1× T4 16 GB) does all training. The portable managed data disk moves between them.
+2. **$200 free-trial credit is the hard ceiling — no pay-as-you-go.** Target spend is $35–50. The project must complete within 30 days or before credits run out, whichever comes first. Managed disks persist through VM deallocate — you never lose data by pausing.
+3. **Two-VM strategy.** A cheap `Standard_B2ms` (~$0.083/hr) does all CPU-bound data prep. A `Standard_NC8as_T4_v3` (~$0.752/hr, 1× T4 16 GB) does all training. The portable managed data disk moves between them.
 4. **Deallocate, never just stop.** `az vm deallocate` stops compute billing; `az vm stop` does NOT. Always deallocate the T4 VM when not actively training/evaluating/serving. This is THE budget lever — see §8.
 5. **Streaming is the default for large corpora.** FineWeb-Edu is never mirrored raw; it is iterated via `datasets.load_dataset(..., streaming=True)` and tokenized in-flight. **Hard cap: 500M tokens** (not 2–3B) to keep training within budget.
 6. **Phase gates are mandatory.** Do not start phase *N+1* until phase *N* has a green checkpoint, a logged metric, and a short note in the PR description.
@@ -21,7 +21,7 @@ This file is the **source of truth for how work gets done** on this project: eve
 11. **Reproducibility first.** Every training run has a `configs/<run>.yaml`, a recorded git SHA, a seed (`SEED=42`), and a `logs/<run>/` directory that contains the full stdout + TensorBoard events.
 12. **Defensive defaults.** Every script must guard against missing files, empty shards, OOM, and network dropouts. Fail loudly, never silently.
 13. **FP16, not BF16.** The T4 (Turing architecture) has no BF16 support. All mixed-precision code uses `torch.float16` + `GradScaler`. Never use `torch.bfloat16` on this hardware.
-14. **Ephemeral temp disk is scratch only.** The 352 GiB temp disk at `/mnt` is **wiped on deallocate**. Never store checkpoints, tokenizer files, or any artifact that must survive a stop there. Only `/data` (managed data disk) and `/` (OS disk) persist.
+14. **Ephemeral temp disk is scratch only.** The 360 GB temp disk at `/mnt` is **wiped on deallocate**. Never store checkpoints, tokenizer files, or any artifact that must survive a stop there. Only `/data` (managed data disk) and `/` (OS disk) persist.
 
 ### 0.1 `README.md` maintenance contract (mandatory)
 
@@ -352,7 +352,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 - **A. Observability** — every long-running script (`train.py`, `serve.py`, the streaming tokenizers) emits structured logs and (where applicable) Prometheus metrics on `/metrics`.
 - **B. Security** — no model checkpoint contains secrets; HF tokens loaded from env; `gitleaks` in CI.
-- **C. Cost guardrails** — Azure spend is capped at **$50–70** (within the $200 free-trial credit, no pay-as-you-go). Set Azure Cost Management budget alerts at $50 and $70. `az consumption usage list --top 10 -o table` from Mac to check daily. If approaching $70: deallocate the T4 VM immediately, keep the disks, resume later. See §8.
+- **C. Cost guardrails** — Azure spend is capped at **$35–50** (within the $200 free-trial credit, no pay-as-you-go). Set Azure Cost Management budget alerts at $40 and $50. `az consumption usage list --top 10 -o table` from Mac to check daily. If approaching $50: deallocate the T4 VM immediately, keep the disks, resume later. See §8.
 - **D. Data license tracking** — every dataset added is logged in `docs/DATA_LICENSES.md` with version + license + SHA of the loader script.
 - **E. Reproducibility matrix** — a single `scripts/repro.sh` that, from a clean clone, reproduces the published checkpoint and metrics. Runs in CI nightly.
 - **F. Dependency hygiene** — Dependabot weekly; `uv pip compile requirements.in` → `requirements.txt` is the source of truth.
@@ -632,20 +632,20 @@ Phases 5 and 7 (docs-only slice) can begin as soon as 4 is in motion, in paralle
 
 ## 8. Budget & Cost Control (within $200 free-trial credit, no pay-as-you-go)
 
-The Azure free trial gives **$200 credit over 30 days**. We target **$50–70** total spend, leaving $130+ as buffer. Every dollar of compute is preserved by deallocating VMs when idle.
+The Azure free trial gives **$200 credit over 30 days**. We target **$35–50** total spend, leaving $150+ as buffer. Every dollar of compute is preserved by deallocating VMs when idle.
 
 ### 8.1 Cost breakdown
 
 | Item | Rate | Est. usage | Cost |
 |---|---|---|---|
-| B2ms VM (data prep: download, clean, tokenize, BPE, FineWeb streaming) | $0.08/hr | ~16 h | ~$1.30 |
-| NC8as_T4_v3 VM (training + eval + serving dev) | $1.120/hr | ~30 h | ~$34 |
+| B2ms VM (data prep: download, clean, tokenize, BPE, FineWeb streaming) | $0.083/hr | ~16 h | ~$1.33 |
+| NC8as_T4_v3 VM (training + eval + serving dev) | $0.752/hr | ~30 h | ~$22.56 |
 | OS disk 128 GiB Standard SSD (×2 VMs, ~2 wks pro-rated) | ~$10/mo | ~2 wks | ~$5 |
 | Data disk 64 GiB Standard SSD (portable, ~2 wks) | ~$5/mo | ~2 wks | ~$2.50 |
 | Public IP (~2 wks active, deallocated periods free) | ~$3/mo | ~2 wks | ~$1.50 |
 | Azure Blob Storage (checkpoint backups) | ~$0.02/GB/mo | ~2 GB | ~$0.04 |
-| **Total estimated** | | | **~$47–55** |
-| Buffer (reruns, hyperparam tuning, crashes) | | | ~$8–18 |
+| **Total estimated** | | | **~$33** |
+| Buffer (reruns, hyperparam tuning, crashes) | | | ~$8–15 |
 
 ### 8.2 Compute-hour plan (~30 T4-hours)
 
@@ -661,17 +661,17 @@ Data prep (B2ms): ~16 hours total (download + clean + tokenize + BPE train + Fin
 
 ### 8.3 Cost discipline rules
 
-1. **Deallocate, never just stop.** `az vm deallocate` stops compute billing. `az vm stop` does not. The only thing you pay during deallocate is the managed disks (~$0.40/day total).
-2. **B2ms for all CPU work.** Data download, cleaning, tokenization, BPE training, and FineWeb streaming all run on the $0.08/hr B2ms. The $1.12/hr T4 is only for training, eval, and serving.
-3. **Check Azure Cost Management daily.** `az consumption usage list --top 10 -o table` from your Mac. Set a budget alert at $50 and a second at $70 in the Azure portal (Cost Management → Budgets).
+1. **Deallocate, never just stop.** `az vm deallocate` stops compute billing. `az vm stop` does not. The only thing you pay during deallocate is the managed disks (~$0.50/day total).
+2. **B2ms for all CPU work.** Data download, cleaning, tokenization, BPE training, and FineWeb streaming all run on the $0.083/hr B2ms. The $0.752/hr T4 is only for training, eval, and serving.
+3. **Check Azure Cost Management daily.** `az consumption usage list --top 10 -o table` from your Mac. Set a budget alert at $40 and a second at $50 in the Azure portal (Cost Management → Budgets).
 4. **FineWeb-Edu is capped at 500M tokens.** Not 2–3B. Training wall-clock = steps × time-per-step; time-per-step depends on model size + batch, NOT corpus size. So adding FineWeb tokens doesn't increase training time as long as the step count stays at 100k. The cap is about keeping the data disk small and streaming time short.
-5. **If credits run low** (approaching $70 spent): deallocate the T4 immediately, keep the disks (they're cheap at ~$0.40/day), and resume training later within the 30-day trial window. The `--resume latest` checkpoint contract means you lose nothing but time.
+5. **If credits run low** (approaching $50 spent): deallocate the T4 immediately, keep the disks (they're cheap at ~$0.50/day), and resume training later within the 30-day trial window. The `--resume latest` checkpoint contract means you lose nothing but time.
 
 ### 8.4 What to do if the 30-day trial is expiring
 
 1. Deallocate both VMs (stops all compute billing).
 2. The managed disks (OS + data) persist — they are not deleted by deallocate.
-3. If you need to keep the disks past the trial: they cost ~$0.40/day. For a few extra days, this is pennies.
+3. If you need to keep the disks past the trial: they cost ~$0.50/day. For a few extra days, this is pennies.
 4. If the trial subscription is being deleted: snapshot the data disk and OS disk to Azure Blob or download the final checkpoint + tokenizer to your Mac (~300 MB total — the one time data leaves Azure).
 5. Resume on a fresh free trial or a different subscription by creating a new VM and attaching the saved disk / restoring the checkpoint.
 
