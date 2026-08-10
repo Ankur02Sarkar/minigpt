@@ -69,7 +69,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - `az disk create --resource-group minigpt-rg --name minigpt-data --size-gb 64 --sku StandardSSD_LRS`.
   - The data disk is portable — it will move between B2ms and T4 VMs.
 - **0.2 Provision B2ms prep VM** `[ ]`
-  - `az vm create --resource-group minigpt-rg --name minigpt-prep --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_B2ms --admin-username ubuntu --ssh-key-values ~/.ssh/id_rsa.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
+  - `az vm create --resource-group minigpt-rg --name minigpt-prep --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_B2ms --admin-username ubuntu --ssh-key-values ~/.ssh/id_ed25519.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
   - Attach the data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
   - Configure NSG: open 22, 8080, 11434 only to your IP.
   - Generate + upload SSH key; disable password auth.
@@ -140,7 +140,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 - **1.10 Move data disk to T4 VM** `[ ]`
   - `az vm disk detach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
   - `az vm deallocate --resource-group minigpt-rg --name minigpt-prep` (stop B2ms billing).
-  - Create T4 VM: `az vm create --resource-group minigpt-rg --name minigpt-train --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_NC8as_T4_v3 --admin-username ubuntu --ssh-key-values ~/.ssh/id_rsa.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
+  - Create T4 VM: `az vm create --resource-group minigpt-rg --name minigpt-train --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_NC8as_T4_v3 --admin-username ubuntu --ssh-key-values ~/.ssh/id_ed25519.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
   - Install NVIDIA driver: `az vm extension set --resource-group minigpt-rg --vm-name minigpt-train --name NvidiaGpuDriverLinux --publisher Microsoft.HpcCompute`.
   - Attach data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-train --name minigpt-data`.
   - SSH in, mount `/data`, verify `nvidia-smi` shows 1× Tesla T4 16 GB.
