@@ -8,25 +8,29 @@ This file is the **source of truth for how work gets done** on this project: eve
 
 ## 0. Global Rules (apply to every phase)
 
-1. **Oracle Cloud is the only machine that touches data.** No dataset is downloaded, stored, cleaned, or tokenized on the MacBook. The Mac is a thin client: editor + `git` + `ssh`.
-2. **200 GB storage ceiling is a hard constraint** (100 GB boot + 100 GB block = `/data`). Any plan that pushes past 200 GB must be cut, not stretched.
-3. **Streaming is the default for large corpora.** FineWeb-Edu is never mirrored raw; it is iterated via `datasets.load_dataset(..., streaming=True)` and tokenized in-flight.
-4. **Phase gates are mandatory.** Do not start phase *N+1* until phase *N* has a green checkpoint, a logged metric, and a short note in the PR description.
-5. **Every code change lands via a feature branch + PR.** No direct pushes to `main`. PR title follows Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
-6. **No silent regressions.** If a training metric moves by > 5% vs. the previous best run, document why in `logs/RUN_NOTES.md` and link the offending commit.
-7. **Secrets never enter the repo.** Oracle API keys, HF tokens, Docker Hub creds live in `.env` (gitignored) or Oracle Vault.
-8. **`README.md` is a living artifact.** See §0.1 — it must stay current at all times.
-9. **Reproducibility first.** Every training run has a `configs/<run>.yaml`, a recorded git SHA, a seed (`SEED=42`), and a `logs/<run>/` directory that contains the full stdout + TensorBoard events.
-10. **Defensive defaults.** Every script must guard against missing files, empty shards, OOM, and network dropouts. Fail loudly, never silently.
+1. **Microsoft Azure is the only platform that touches data.** No dataset is downloaded, stored, cleaned, or tokenized on the MacBook. The Mac is a thin client: editor + `git` + `ssh` + `az` CLI.
+2. **$200 free-trial credit is the hard ceiling — no pay-as-you-go.** Target spend is $50–70. The project must complete within 30 days or before credits run out, whichever comes first. Managed disks persist through VM deallocate — you never lose data by pausing.
+3. **Two-VM strategy.** A cheap `Standard_B2ms` (~$0.08/hr) does all CPU-bound data prep. A `Standard_NC8as_T4_v3` (~$1.120/hr, 1× T4 16 GB) does all training. The portable managed data disk moves between them.
+4. **Deallocate, never just stop.** `az vm deallocate` stops compute billing; `az vm stop` does NOT. Always deallocate the T4 VM when not actively training/evaluating/serving. This is THE budget lever — see §8.
+5. **Streaming is the default for large corpora.** FineWeb-Edu is never mirrored raw; it is iterated via `datasets.load_dataset(..., streaming=True)` and tokenized in-flight. **Hard cap: 500M tokens** (not 2–3B) to keep training within budget.
+6. **Phase gates are mandatory.** Do not start phase *N+1* until phase *N* has a green checkpoint, a logged metric, and a short note in the PR description.
+7. **Every code change lands via a feature branch + PR.** No direct pushes to `main`. PR title follows Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`).
+8. **No silent regressions.** If a training metric moves by > 5% vs. the previous best run, document why in `logs/RUN_NOTES.md` and link the offending commit.
+9. **Secrets never enter the repo.** Azure service principal creds, HF tokens, Docker Hub creds live in `.env` (gitignored) or Azure Key Vault.
+10. **`README.md` is a living artifact.** See §0.1 — it must stay current at all times.
+11. **Reproducibility first.** Every training run has a `configs/<run>.yaml`, a recorded git SHA, a seed (`SEED=42`), and a `logs/<run>/` directory that contains the full stdout + TensorBoard events.
+12. **Defensive defaults.** Every script must guard against missing files, empty shards, OOM, and network dropouts. Fail loudly, never silently.
+13. **FP16, not BF16.** The T4 (Turing architecture) has no BF16 support. All mixed-precision code uses `torch.float16` + `GradScaler`. Never use `torch.bfloat16` on this hardware.
+14. **Ephemeral temp disk is scratch only.** The 352 GiB temp disk at `/mnt` is **wiped on deallocate**. Never store checkpoints, tokenizer files, or any artifact that must survive a stop there. Only `/data` (managed data disk) and `/` (OS disk) persist.
 
 ### 0.1 `README.md` maintenance contract (mandatory)
 
 `README.md` is the public face of this project for **end users and OSS contributors** (people who have never read `ARCHITECTURE.md` or this file). It must be updated **in the same commit as any change that affects**:
 
-- **Setup / install** — new system packages, Python deps, Docker base images, Oracle shape changes.
+- **Setup / install** — new system packages, Python deps, Docker base images, Azure VM size changes.
 - **Usage** — any new CLI flag, env var, or config field on `train.py`, `generate.py`, the FastAPI server.
 - **API surface** — any new/changed/removed OpenAI or Ollama endpoint, request/response shape, or example `curl`.
-- **Data** — new dataset added, streaming policy change, tokenizer vocab change.
+- **Data** — new dataset added, streaming policy change, tokenizer vocab change, FineWeb token cap change.
 - **Model** — new config preset, parameter count change, context-length change.
 - **Deployment** — new Docker tag, new env var, new port, new volume mount.
 - **Roadmap / status** — every completed phase is checked off; every new in-flight task is added.
@@ -55,41 +59,48 @@ If you are an agent ending a turn where you changed any of the above and `README
 
 ## 2. Phase Map (Major → Minor)
 
-The project is divided into **7 major phases** and **~40 minor phases**. Status markers: `[ ]` pending, `[~]` in progress, `[x]` done, `[!]` blocked.
+The project is divided into **7 major phases** and **~35 minor phases**. Status markers: `[ ]` pending, `[~]` in progress, `[x]` done, `[!]` blocked.
 
-### Phase 0 — Foundation & Infra (Oracle bootstrap)
-*Goal: a reproducible, on-Oracle dev environment with `/data` mounted and the repo running in Docker.*
+### Phase 0 — Foundation & Infra (Azure bootstrap)
+*Goal: a reproducible, on-Azure dev environment with `/data` mounted and the repo running in Docker. Two VMs: B2ms for prep, NC8as_T4_v3 for training.*
 
-- **0.1 Provision Oracle VM.Standard.A1.Flex instance** `[ ]`
-  - 4 OCPUs / 24 GB RAM, Ubuntu 22.04 LTS minimal.
+- **0.1 Create Azure resource group + managed data disk** `[ ]`
+  - `az group create --name minigpt-rg --location eastus`.
+  - `az disk create --resource-group minigpt-rg --name minigpt-data --size-gb 64 --sku StandardSSD_LRS`.
+  - The data disk is portable — it will move between B2ms and T4 VMs.
+- **0.2 Provision B2ms prep VM** `[ ]`
+  - `az vm create --resource-group minigpt-rg --name minigpt-prep --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_B2ms --admin-username ubuntu --ssh-key-values ~/.ssh/id_rsa.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
+  - Attach the data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
+  - Configure NSG: open 22, 8080, 11434 only to your IP.
   - Generate + upload SSH key; disable password auth.
-  - Configure Oracle VCN + security list (open 22, 8080, 11434 only to your IP).
-- **0.2 Attach 100 GB block volume and mount at `/data`** `[ ]`
-  - `iscsiadm` discovery → login → `fdisk` → `mkfs.ext4` → `fstab` entry with `nofail`.
-  - Verify with `df -h /data` and a `fio` smoke test (≥ 75 IOPS read, ≥ 50 IOPS write).
-- **0.3 Install system packages on the instance** `[ ]`
+- **0.3 Format + mount the data disk on B2ms** `[ ]`
+  - `sudo parted /dev/sdc --script mklabel gpt mkpart primary ext4 0% 100%`.
+  - `sudo mkfs.ext4 /dev/sdc1 && sudo mkdir -p /data`.
+  - `echo '/dev/sdc1 /data ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab && sudo mount -a`.
+  - Verify with `df -h /data` and a `fio` smoke test (≥ 50 IOPS read, ≥ 50 IOPS write on Standard SSD).
+- **0.4 Install system packages on the B2ms instance** `[ ]`
   - `git`, `build-essential`, `python3.12`, `python3.12-venv`, `docker.io`, `docker-compose-plugin`, `htop`, `tmux`, `unzip`.
   - Add the `ubuntu` user to the `docker` group; `newgrp docker`.
-- **0.4 Clone the repo and pin Python env** `[ ]`
+- **0.5 Clone the repo and pin Python env** `[ ]`
   - `git clone git@github.com:<org>/minigpt_llm.git /opt/minigpt_llm`.
   - `python3.12 -m venv .venv && source .venv/bin/activate`.
   - `pip install -U pip uv && uv pip install -r requirements.txt -r requirements-dev.txt`.
-- **0.5 Build the base Docker image** `[ ]`
+- **0.6 Build the base Docker image** `[ ]`
   - `docker build -f docker/Dockerfile.base -t minigpt/base:latest .`.
   - Tag with the git SHA: `docker tag minigpt/base:latest minigpt/base:$SHA`.
-- **0.6 Pre-commit + CI bootstrap** `[ ]`
+- **0.7 Pre-commit + CI bootstrap** `[ ]`
   - `.pre-commit-config.yaml`, `.github/workflows/ci.yml` (lint + typecheck + test on PR).
   - Branch protection on `main`: require CI green + 1 review.
-- **0.7 README "Quickstart" skeleton** `[ ]`
+- **0.8 README "Quickstart" skeleton** `[ ]`
   - Badges (CI, license, python, docker), 1-paragraph elevator pitch, 5-line "what is this", 1 `curl` example.
   - Filled out properly in Phase 7 once endpoints exist.
 
-**Exit criteria:** `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` succeeds on the instance, and `df -h /data` shows the block volume mounted.
+**Exit criteria:** `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` succeeds on the B2ms instance, and `df -h /data` shows the data disk mounted.
 
 ---
 
-### Phase 1 — Data Pipeline (Oracle-only)
-*Goal: tokenized, deduplicated `.bin` shards on `/data/tokenized/` ready for training, total ≤ 50 GB.*
+### Phase 1 — Data Pipeline (on B2ms)
+*Goal: tokenized, deduplicated `.bin` shards on `/data/tokenized/` ready for training, total ≤ 20 GB. Runs entirely on the cheap B2ms VM.*
 
 - **1.1 TinyStories raw download** `[ ]`
   - `datasets.load_dataset("roneneldan/TinyStories", split="train")` → `/data/raw/tinystories.txt`.
@@ -102,18 +113,18 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - `datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)`.
   - Wrap in a generator that yields `(doc_id, text)`; **no persistence of raw docs**.
   - Add a unit test that asserts the generator advances without buffering more than N docs in memory.
-- **1.4 FineWeb-Edu filter + on-the-fly tokenization** `[ ]`
+- **1.4 FineWeb-Edu filter + on-the-fly tokenization (capped at 500M tokens)** `[ ]`
   - Drop docs < 200 chars or > 100k chars.
   - Apply lang-detect sanity (must be `en`, score ≥ 0.9).
   - Tokenize in mini-batches of 1000 docs, append int32 IDs to `/data/tokenized/fineweb.bin`.
-  - Stop the stream when the shard hits the configured cap (default: 20 GB / ~2.5B tokens).
+  - **Stop the stream when the shard hits the 500M-token cap** (~2 GB int32). NOT 2–3B — the cap is budget-critical.
 - **1.5 Cleaning + dedupe pass** `[ ]`
   - For TinyStories + WikiText: `regex` strip control chars, collapse whitespace, drop empty lines.
   - Concat to `/data/cleaned/all_text.txt` (~8 GB).
   - Dedupe at the doc level: SHA-1 of normalized text → keep first occurrence. Log dedupe ratio.
 - **1.6 BPE tokenizer training (vocab 32k)** `[ ]`
   - `tokenizers.ByteLevelBPETokenizer.train(files=[...], vocab_size=32000, min_frequency=2)`.
-  - Save `vocab.json` + `merges.txt` to **both** `/data/vocab/` (block) and `/opt/minigpt_llm/tokenizer/` (boot).
+  - Save `vocab.json` + `merges.txt` to `/data/vocab/` (data disk). After moving the disk to the T4 VM, copy to `/opt/minigpt_llm/tokenizer/` (OS disk).
   - Verify round-trip encode/decode on a 1k-doc sample.
 - **1.7 Tokenize all corpora → `.bin` shards** `[ ]`
   - Read each cleaned text file, encode with the trained tokenizer, write as int32 array.
@@ -126,8 +137,15 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - `python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4`.
   - Assert shapes `(4, 1024)` for `input_ids` and `labels`.
   - Assert no `nan` and that `labels` are `input_ids` shifted by one.
+- **1.10 Move data disk to T4 VM** `[ ]`
+  - `az vm disk detach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
+  - `az vm deallocate --resource-group minigpt-rg --name minigpt-prep` (stop B2ms billing).
+  - Create T4 VM: `az vm create --resource-group minigpt-rg --name minigpt-train --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_NC8as_T4_v3 --admin-username ubuntu --ssh-key-values ~/.ssh/id_rsa.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
+  - Install NVIDIA driver: `az vm extension set --resource-group minigpt-rg --vm-name minigpt-train --name NvidiaGpuDriverLinux --publisher Microsoft.HpcCompute`.
+  - Attach data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-train --name minigpt-data`.
+  - SSH in, mount `/data`, verify `nvidia-smi` shows 1× Tesla T4 16 GB.
 
-**Exit criteria:** `ls -lah /data/tokenized/` shows all shards + `meta.pkl`; `df -h /data` shows ≤ 60 GB used; smoke test passes.
+**Exit criteria:** `ls -lah /data/tokenized/` shows all shards + `meta.pkl`; `df -h /data` shows ≤ 20 GB used; smoke test passes; `nvidia-smi` works on the T4 VM.
 
 ---
 
@@ -136,7 +154,7 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
 
 - **2.1 Config system (`model/config.py`)** `[ ]`
   - `@dataclass(frozen=True)` `ModelConfig` with `vocab_size`, `num_layers`, `hidden_size`, `num_heads`, `max_position_embeddings`, `dropout`, `rope_theta`, `tie_weights`.
-  - YAML loader: `load_config("configs/tiny.yaml")` returns a typed `ModelConfig`.
+  - YAML loader: `load_config("configs/medium.yaml")` returns a typed `ModelConfig`.
   - Param-count helper: `estimate_params(config) -> int` (verified vs. real instantiation to within 1%).
 - **2.2 Token + positional embeddings** `[ ]`
   - `nn.Embedding(vocab_size, hidden_size)` for tokens.
@@ -158,12 +176,12 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - `generate(input_ids, max_new_tokens, temperature, top_k, top_p)` with KV-cache.
 - **2.7 Weight init + dtype policy** `[ ]`
   - Truncated normal init (std 0.02) for linears, normal init for embeddings.
-  - `model.to(dtype=torch.bfloat16)` for A10 paths; FP32 on CPU.
+  - **FP16 on T4** (`model.to(dtype=torch.float16)` for inference); FP32 master weights for training with `GradScaler`. **Never `torch.bfloat16`** — T4 (Turing) has no BF16 support.
 - **2.8 Sanity overfit on a single batch** `[ ]`
   - Generate 1 batch of 1024 tokens, run 200 steps, assert loss < 2.0.
   - Add as `tests/test_overfit.py` so it runs in CI on a CPU-only runner.
 
-**Exit criteria:** `pytest tests/model -q` green; overfit test passes; `configs/large.yaml` instantiates a ~50M-param model.
+**Exit criteria:** `pytest tests/model -q` green; overfit test passes; `configs/medium.yaml` instantiates a ~20M-param model.
 
 ---
 
@@ -180,18 +198,19 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - Linear warmup (default 2000 steps) → cosine decay to 10% of peak.
   - Pure-PyTorch (no `transformers` dependency in core).
 - **3.4 Checkpointing (`training/checkpoint.py`)** `[ ]`
-  - Save `{model, optimizer, scheduler, scaler, step, config, rng_state}` as a single `.pt` to `/opt/minigpt_llm/checkpoints/`.
+  - Save `{model, optimizer, scheduler, scaler, step, config, rng_state}` as a single `.pt` to `/opt/minigpt_llm/checkpoints/` (OS disk — persistent, survives deallocate).
   - Atomic write (`*.tmp` → rename) to survive interruption.
-  - Keep last 3 + best (by val loss).
+  - Keep last 3 + best (by val loss). Never write to `/mnt` (ephemeral temp disk — wiped on deallocate).
 - **3.5 Evaluation (`training/evaluate.py`)** `[ ]`
   - Run val loss over `val.bin` in fixed batches; return `{val_loss, val_ppl}`.
   - Optional perplexity-per-domain if multiple val shards exist.
 - **3.6 Logging (`training/logging.py`)** `[ ]`
   - `tensorboard` writer under `/opt/minigpt_llm/logs/<run>/`.
   - Stdout via `structlog`; every step logs `loss`, `lr`, `throughput (tok/s)`, `gpu_mem`.
-- **3.7 Gradient accumulation + AMP** `[ ]`
+- **3.7 Gradient accumulation + AMP (FP16)** `[ ]`
   - Configurable `grad_accum`; effective batch = `per_device_batch * grad_accum * world_size`.
-  - `torch.amp.autocast("cuda", dtype=bfloat16)` on A10; FP32 on CPU.
+  - **FP16**: `torch.amp.autocast("cuda", dtype=torch.float16)` + `torch.cuda.amp.GradScaler()` on T4. **Never `bfloat16`** — T4 (Turing) has no BF16. FP32 on CPU.
+  - T4 has 16 GB VRAM: `per_device_batch=4`, `grad_accum=16` → effective batch 64.
   - NaN/Inf guard: skip step, log, do not update.
 - **3.8 CLI entry point (`training/train.py`)** `[ ]`
   - `argparse` + `pydantic` validation of CLI args.
@@ -204,37 +223,36 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
 
 **Exit criteria:** `python -m training.train --config configs/tiny.yaml --max-steps 1000` completes, logs to TensorBoard, writes a checkpoint, and `evaluate.py` runs end-to-end on `val.bin`.
 
----
-
 ### Phase 4 — Training Runs (progressive scaling)
-*Goal: three production-quality models, fully logged, ready to serve.*
+*Goal: two production-quality models, fully logged, ready to serve. The 20M model is the final deliverable — no 50M Phase 3.*
 
 - **4.1 Phase-runner script (`scripts/run_phase.sh`)** `[ ]`
   - Wraps `train.py` with per-phase `max_steps`, eval cadence, and checkpoint retention.
-  - Writes `logs/<phase>/RUN.md` with start/end time, peak GPU mem, final loss/PPL.
-- **4.2 Phase 1 — 8M model on TinyStories (CPU OK, A10 fast)** `[ ]`
+  - Writes `logs/<phase>/RUN.md` with start/end time, peak GPU mem, final loss/PPL, T4-hours consumed.
+- **4.2 Phase 1 — 8M model on TinyStories (T4, ~4 h)** `[ ]`
   - Config: `tiny.yaml` (6L, 256-dim, 4 heads, ctx 512).
   - 50k steps, eval every 1k, target val PPL ≤ 25.
   - Documented in `logs/phase1/RUN.md`.
-- **4.3 Phase 2 — 20M model on TinyStories + WikiText (A10)** `[ ]`
+- **4.3 Phase 2 — 20M model on TinyStories + WikiText + capped FineWeb (T4, ~20 h) — FINAL** `[ ]`
   - Config: `medium.yaml` (8L, 384-dim, 6 heads, ctx 1024).
   - 100k steps, eval every 2k, target val PPL ≤ 18.
-- **4.4 Hyperparam tuning pass** `[ ]`
-  - Sweep LR in {3e-4, 5e-4, 7e-4}, warmup in {1k, 2k, 4k} on Phase 2.
-  - Pick best, freeze, promote to `configs/large.yaml`.
-- **4.5 Phase 3 — 50M model on Tiny + Wiki + FineWeb-Edu stream (A10)** `[ ]`
-  - Config: `large.yaml` (12L, 512-dim, 8 heads, ctx 1024).
-  - 200k steps, eval every 2k, target val PPL ≤ 12.
-  - Run started on A10 (pay-go), resumable from `checkpoints/`.
+  - This is the shipped model. Documented in `logs/phase2/RUN.md`.
+- **4.4 Hyperparam tuning pass (budget-aware, short)** `[ ]`
+  - Sweep LR in {3e-4, 5e-4, 7e-4}, warmup in {1k, 2k} on Phase 2.
+  - **Keep total sweep under 4 T4-hours** — use short runs (5k steps each) to compare, not full 100k runs.
+  - Pick best, freeze, promote to `configs/medium.yaml`.
+- **4.5 ~~Phase 3 — 50M model~~ — REMOVED** `[!]`
+  - **Not in scope.** The 50M model on 2–3B FineWeb tokens was removed to keep spend under $70. If credits remain after Phase 2, a reduced 30M stretch run is possible but not planned.
 - **4.6 Long-run monitoring** `[ ]`
   - `tmux`/`screen` session named `train-<phase>`.
-  - Cron every 5 min: `nvidia-smi`, `df -h /data`, last log line → `logs/heartbeat.log`.
-  - Auto-snapshot checkpoint to Oracle Object Storage every 4h (free egress allowance).
+  - Cron every 5 min: `nvidia-smi`, `df -h /data`, `df -h /`, last log line → `logs/heartbeat.log`.
+  - Auto-snapshot checkpoint to **Azure Blob Storage** every 4h via `azcopy` (off-host backup, ~$0.02/GB/mo).
+  - **Deallocate the T4 VM between long gaps** (overnight pauses, multi-day breaks). `--resume latest` picks up cleanly from the last checkpoint.
 - **4.7 Final eval report** `[ ]`
-  - `docs/EVAL.md` with side-by-side loss/PPL curves for all three phases.
+  - `docs/EVAL.md` with side-by-side loss/PPL curves for both phases.
   - Sample generations on a fixed prompt set (10 prompts × 3 seeds) → `docs/SAMPLES.md`.
 
-**Exit criteria:** Phase 3 checkpoint under `checkpoints/phase3/best.pt`, val PPL ≤ 12, `EVAL.md` + `SAMPLES.md` published.
+**Exit criteria:** Phase 2 checkpoint under `checkpoints/phase2/best.pt`, val PPL ≤ 18, `EVAL.md` + `SAMPLES.md` published. Total T4 spend ≤ ~$55.
 
 ---
 
@@ -252,7 +270,7 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - Log per-token top-5 distribution entropy for the first 20 generations.
   - Detect repetition loops (n-gram repeat in last 64 tokens) and warn.
 
-**Exit criteria:** `python -m inference.chat --checkpoint checkpoints/phase3/best.pt` produces coherent multi-turn output in < 200ms/token on A10.
+**Exit criteria:** `python -m inference.chat --checkpoint checkpoints/phase2/best.pt` produces coherent multi-turn output in < 200ms/token on T4.
 
 ---
 
@@ -325,7 +343,6 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
   - `CODEOWNERS` mapping `model/`, `training/`, `serving/` to the maintainer.
 - **7.10 First release (v0.1.0)** `[ ]`
   - Tag, GitHub release with notes, Docker image pushed to `ghcr.io/<org>/minigpt_llm:0.1.0`.
-  - Cross-post to HN/Reddit (optional).
 
 **Exit criteria:** A stranger can `docker run ghcr.io/<org>/minigpt_llm:0.1.0` and chat with the model within 5 minutes, guided only by `README.md`.
 
@@ -335,7 +352,7 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
 
 - **A. Observability** — every long-running script (`train.py`, `serve.py`, the streaming tokenizers) emits structured logs and (where applicable) Prometheus metrics on `/metrics`.
 - **B. Security** — no model checkpoint contains secrets; HF tokens loaded from env; `gitleaks` in CI.
-- **C. Cost guardrails** — A10 pay-go spend is capped; an alert at 80% of monthly budget shuts the GPU instance down.
+- **C. Cost guardrails** — Azure spend is capped at **$50–70** (within the $200 free-trial credit, no pay-as-you-go). Set Azure Cost Management budget alerts at $50 and $70. `az consumption usage list --top 10 -o table` from Mac to check daily. If approaching $70: deallocate the T4 VM immediately, keep the disks, resume later. See §8.
 - **D. Data license tracking** — every dataset added is logged in `docs/DATA_LICENSES.md` with version + license + SHA of the loader script.
 - **E. Reproducibility matrix** — a single `scripts/repro.sh` that, from a clean clone, reproduces the published checkpoint and metrics. Runs in CI nightly.
 - **F. Dependency hygiene** — Dependabot weekly; `uv pip compile requirements.in` → `requirements.txt` is the source of truth.
@@ -344,17 +361,18 @@ The project is divided into **7 major phases** and **~40 minor phases**. Status 
 
 ## 4. Long-Run Training & Resilience
 
-*Core principle: training runs on the Oracle VM. The Mac is a remote control — it can sleep, shut down, or be reformatted mid-run without affecting the process. SSH is just a remote terminal; the only thing that kills the run is something happening to the Oracle VM itself (reboot, OOM, disk full, crash). The infrastructure below is designed so that even those events are recoverable without the operator being present.*
+*Core principle: training runs on the Azure T4 VM. The Mac is a remote control — it can sleep, shut down, or be reformatted mid-run without affecting the process. SSH is just a remote terminal; the only thing that kills the run is something happening to the Azure VM itself (deallocate, reboot, OOM, disk full, crash). The infrastructure below is designed so that even those events are recoverable without the operator being present.*
 
 ### 4.1 Why not tmux (or nohup)?
 
 `tmux` and `nohup ... &` only solve the **SSH-disconnect** problem. They do **nothing** for:
 
-- Oracle reboot (kernel updates, host maintenance)
+- Azure host maintenance / reboot
 - OOM kill
 - Training crash (NaN loss, segfault, CUDA error)
 - Disk full mid-shard
 - A bug that crashes the process 3 seconds after start (loops forever)
+- **VM deallocate** (the temp disk at `/mnt` is wiped, but `/data` and OS disk persist)
 
 For any multi-hour run we use **`systemd`**, which is built for "run this forever, restart on failure, resume from where you stopped." tmux/nohup are acceptable only for runs shorter than ~1 hour.
 
@@ -403,18 +421,22 @@ sudo systemctl enable --now minigpt-train
 
 | Question | Command (run from your Mac) |
 |---|---|
-| Is it running? | `ssh oracle 'systemctl is-active minigpt-train'` |
-| Last 50 log lines | `ssh oracle 'journalctl -u minigpt-train -n 50 --no-pager'` |
-| Current step / loss / GPU / disk | `ssh oracle 'cat /opt/minigpt_llm/STATUS.json'` |
-| How many times has it crashed since start? | `ssh oracle 'systemctl show minigpt-train -p NRestarts'` |
-| Loss curves in a browser | `ssh -L 6006:localhost:6006 oracle` → `http://localhost:6006` |
+| Is the VM running? | `az vm show --show-details -g minigpt-rg -n minigpt-train --query powerState -o tsv` |
+| Is it running? | `ssh azure-train 'systemctl is-active minigpt-train'` |
+| Last 50 log lines | `ssh azure-train 'journalctl -u minigpt-train -n 50 --no-pager'` |
+| Current step / loss / GPU / disk | `ssh azure-train 'cat /opt/minigpt_llm/STATUS.json'` |
+| How many times has it crashed since start? | `ssh azure-train 'systemctl show minigpt-train -p NRestarts'` |
+| Loss curves in a browser | `ssh -L 6006:localhost:6006 azure-train` → `http://localhost:6006` |
+| Spend so far | `az consumption usage list --top 10 -o table` |
+
+(Add `Host azure-train` with the T4 VM's IP to `~/.ssh/config` so you don't type the IP every time.)
 
 ### 4.4 Heartbeat (cron, every 5 min)
 
 `/opt/minigpt_llm/scripts/heartbeat.sh`:
 ```bash
 #!/bin/bash
-LOG=/opt/minigpt_llm/logs/phase3/run.log
+LOG=/opt/minigpt_llm/logs/phase2/run.log
 STEP=$(grep -oP 'step=\K\d+' "$LOG" | tail -1)
 LOSS=$(grep -oP 'loss=\K[0-9.]+' "$LOG" | tail -1)
 GPU=$(nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader 2>/dev/null || echo "n/a")
@@ -453,21 +475,22 @@ Fallback (no phone signal): `echo "minigpt: training done" | mail -s "minigpt" y
 |---|---|---|
 | SSH drops / Mac sleeps | dies (unless tmux/nohup) | survives |
 | Mac shut down / reformatted | dies (unless tmux/nohup) | survives |
-| Oracle reboots (host maintenance) | dies | auto-restarts after boot, `--resume` from last checkpoint |
+| Azure host maintenance reboot | dies | auto-restarts after boot, `--resume` from last checkpoint |
 | Training crash (OOM, NaN, CUDA error) | dies | auto-restarts after 30s, `--resume` |
 | Disk full on `/data` | crashes silently mid-shard | `ExecStartPre` refuses to start, alert fires |
 | Kernel OOM-kills the process | dies | `OOMScoreAdjust=-500` makes us less likely to be killed; if we are, systemd restarts cleanly |
 | Bug loops (crash within 10s of start, forever) | infinite tight loop | `StartLimitBurst=10` per 600s → systemd gives up, alert fires |
 | `fineweb.bin` write gets interrupted | corrupt shard | atomic write + re-validate on next start |
+| **VM deallocated (budget pause)** | process dies, temp disk wiped | `/data` + OS disk persist; `--resume latest` on next start; `/mnt` scratch is gone (scratch only) |
 
 ### 4.7 Checkpoint + `--resume` contract
 
 - `train.py --resume latest` always restarts from `checkpoints/<run>/latest.pt`.
-- `checkpoints/<run>/` lives on the **boot volume** (not `/data`); survives reboots and re-attachments.
+- `checkpoints/<run>/` lives on the **OS disk** (managed, persistent — survives deallocate); never on `/mnt` (ephemeral, wiped on deallocate).
 - `latest.pt` is updated atomically (`.tmp` → `rename`) every N steps (default 1000). Power loss mid-write ≠ corrupt checkpoint.
 - Best-by-val-loss checkpoint is kept separately as `best.pt`.
 - Keep the last 3 `latest` snapshots to recover from a single corrupted write.
-- Every 4h: snapshot `best.pt` to Oracle Object Storage (free egress) via `rclone`. Off-host backup of the thing you cannot rebuild.
+- Every 4h: snapshot `best.pt` to **Azure Blob Storage** via `azcopy` (off-host backup of the thing you cannot rebuild; ~$0.02/GB/mo).
 
 ### 4.8 TensorBoard service (browser-based loss curves)
 
@@ -493,31 +516,74 @@ WantedBy=multi-user.target
 sudo systemctl enable --now minigpt-tb
 ```
 
-Access from your laptop: `ssh -L 6006:localhost:6006 oracle` → `http://localhost:6006`. Phone-friendly too if you keep the tunnel open in Termius/BlinkShell.
+Access from your laptop: `ssh -L 6006:localhost:6006 azure-train` → `http://localhost:6006`.
 
 ### 4.9 Pre-flight checklist before any run > 1 hour
 
 Before kicking off a long training run, the operator (or agent) MUST verify:
 
-1. A `<run>.service` unit exists at `/etc/systemd/system/minigpt-<run>.service`.
-2. `systemctl enable --now minigpt-<run>` returns 0.
-3. `systemctl is-active minigpt-<run>` returns `active` after 60s.
-4. `cat /opt/minigpt_llm/STATUS.json` updates within 5 min.
-5. `journalctl -u minigpt-<run> -n 5` shows expected boot output (model loaded, dataset opened, step 1 logged).
-6. ntfy topic is configured and a test notification (`notify "test"`) arrives on the phone.
-7. `checkpoints/<run>/` exists and is writable.
+1. The T4 VM is **started** (not deallocated): `az vm show --show-details -g minigpt-rg -n minigpt-train --query powerState -o tsv` returns `VM running`.
+2. The data disk is mounted: `df -h /data` shows the 64 GiB disk.
+3. The GPU is visible: `nvidia-smi` shows 1× Tesla T4 16 GB.
+4. A `<run>.service` unit exists at `/etc/systemd/system/minigpt-<run>.service`.
+5. `systemctl enable --now minigpt-<run>` returns 0.
+6. `systemctl is-active minigpt-<run>` returns `active` after 60s.
+7. `cat /opt/minigpt_llm/STATUS.json` updates within 5 min.
+8. `journalctl -u minigpt-<run> -n 5` shows expected boot output (model loaded, dataset opened, step 1 logged).
+9. ntfy topic is configured and a test notification (`notify "test"`) arrives on the phone.
+10. `checkpoints/<run>/` exists and is writable (on OS disk, not `/mnt`).
 
 If any of these fail, **do not walk away.** Fix first.
 
 ### 4.10 The rule for the next agent
 
-Do not start a multi-hour training run inside a plain `ssh oracle && python ...` command. That is a footgun. Always:
+Do not start a multi-hour training run inside a plain `ssh azure-train && python ...` command. That is a footgun. Always:
 1. Write a `<run>.service` unit.
 2. `systemctl enable --now <run>.service`.
 3. Run the §4.9 pre-flight checklist.
 4. Disconnect.
 
 For runs under 1 hour, `tmux` or `nohup ... &` is fine and does not require a unit file. The threshold is "would I be annoyed if this died and I had to restart it from scratch?"
+
+### 4.11 Azure lifecycle cheat-sheet (run from your Mac)
+
+```bash
+# --- VM power state ---
+# Check if running or deallocated
+az vm show --show-details -g minigpt-rg -n minigpt-train --query powerState -o tsv
+
+# Start the T4 VM (billing resumes)
+az vm start -g minigpt-rg -n minigpt-train
+
+# DEALLOCATE — stop compute billing (THE cost lever)
+az vm deallocate -g minigpt-rg -n minigpt-train
+
+# Restart (reboot — billing continues)
+az vm restart -g minigpt-rg -n minigpt-train
+
+# --- Disk portability (move data disk between B2ms and T4) ---
+# Detach from current VM
+az vm disk detach -g minigpt-rg -n <VM_NAME> --name minigpt-data
+
+# Attach to target VM
+az vm disk attach -g minigpt-rg -n <VM_NAME> --name minigpt-data
+
+# --- Backups ---
+# Snapshot the data disk (point-in-time backup)
+az snapshot create -g minigpt-rg --name data-snap-$(date +%Y%m%d) \
+  --source "/subscriptions/<sub-id>/resourceGroups/minigpt-rg/providers/Microsoft.Compute/disks/minigpt-data"
+
+# Upload checkpoint to Azure Blob (off-host backup)
+azcopy cp /opt/minigpt_llm/checkpoints/phase2/best.pt \
+  "https://<storage-account>.blob.core.windows.net/minigpt/best.pt?<SAS-token>"
+
+# --- Cost tracking ---
+# Check spend so far
+az consumption usage list --top 10 -o table
+
+# Check NC-series GPU quota in your region
+az vm list-usage --location eastus -o table | grep -i "nc"
+```
 
 ---
 
@@ -529,7 +595,7 @@ A minor phase is "done" only when:
 2. Tests covering the new behavior are added (unit, integration, or smoke — whichever fits).
 3. `logs/<run>/` artifacts are committed (or linked from the PR) for any non-trivial run.
 4. `README.md` is updated if any of the §0.1 trigger conditions apply.
-5. `ARCHITECTURE.md` is updated if the architecture itself changed (new shape, new dataset, new endpoint).
+5. `ARCHITECTURE.md` is updated if the architecture itself changed (new VM size, new dataset, new endpoint).
 6. `AGENTS.md` (this file) is updated: flip the `[ ]` → `[x]` and add any newly discovered minor phases discovered during execution.
 
 ---
@@ -549,18 +615,65 @@ Before ending any turn, an agent must:
 ## 7. Phase Dependency Graph (textual)
 
 ```
-0 (Foundation)
- └─> 1 (Data)
-      └─> 2 (Model)
-           └─> 3 (Training Engine)
-                └─> 4 (Training Runs)
-                     ├─> 5 (Inference)
-                     │    └─> 6 (Serving)
-                     │         └─> 7 (Packaging/OSS)
-                     └─> 7 (Packaging/OSS — docs only)
+0 (Foundation — Azure bootstrap)
+  └─> 1 (Data — on B2ms)
+       └─> 2 (Model)
+            └─> 3 (Training Engine)
+                 └─> 4 (Training Runs — 8M + 20M final, on T4)
+                      ├─> 5 (Inference)
+                      │    └─> 6 (Serving)
+                      │         └─> 7 (Packaging/OSS)
+                      └─> 7 (Packaging/OSS — docs only)
 ```
 
 Phases 5 and 7 (docs-only slice) can begin as soon as 4 is in motion, in parallel with 6.
+
+---
+
+## 8. Budget & Cost Control (within $200 free-trial credit, no pay-as-you-go)
+
+The Azure free trial gives **$200 credit over 30 days**. We target **$50–70** total spend, leaving $130+ as buffer. Every dollar of compute is preserved by deallocating VMs when idle.
+
+### 8.1 Cost breakdown
+
+| Item | Rate | Est. usage | Cost |
+|---|---|---|---|
+| B2ms VM (data prep: download, clean, tokenize, BPE, FineWeb streaming) | $0.08/hr | ~16 h | ~$1.30 |
+| NC8as_T4_v3 VM (training + eval + serving dev) | $1.120/hr | ~30 h | ~$34 |
+| OS disk 128 GiB Standard SSD (×2 VMs, ~2 wks pro-rated) | ~$10/mo | ~2 wks | ~$5 |
+| Data disk 64 GiB Standard SSD (portable, ~2 wks) | ~$5/mo | ~2 wks | ~$2.50 |
+| Public IP (~2 wks active, deallocated periods free) | ~$3/mo | ~2 wks | ~$1.50 |
+| Azure Blob Storage (checkpoint backups) | ~$0.02/GB/mo | ~2 GB | ~$0.04 |
+| **Total estimated** | | | **~$47–55** |
+| Buffer (reruns, hyperparam tuning, crashes) | | | ~$8–18 |
+
+### 8.2 Compute-hour plan (~30 T4-hours)
+
+| Task | T4 hours |
+|---|---|
+| Phase 1 (8M, TinyStories, ~50k steps) | ~4 |
+| Phase 2 / FINAL (20M, full corpus, ~100k steps) | ~20 |
+| Eval + generation dev + serving setup/tests | ~6 |
+| Buffer (crashes, reruns) | ~5 (from buffer) |
+| **Total T4 hours** | **~30** |
+
+Data prep (B2ms): ~16 hours total (download + clean + tokenize + BPE train + FineWeb streaming). This does NOT consume T4 budget.
+
+### 8.3 Cost discipline rules
+
+1. **Deallocate, never just stop.** `az vm deallocate` stops compute billing. `az vm stop` does not. The only thing you pay during deallocate is the managed disks (~$0.40/day total).
+2. **B2ms for all CPU work.** Data download, cleaning, tokenization, BPE training, and FineWeb streaming all run on the $0.08/hr B2ms. The $1.12/hr T4 is only for training, eval, and serving.
+3. **Check Azure Cost Management daily.** `az consumption usage list --top 10 -o table` from your Mac. Set a budget alert at $50 and a second at $70 in the Azure portal (Cost Management → Budgets).
+4. **FineWeb-Edu is capped at 500M tokens.** Not 2–3B. Training wall-clock = steps × time-per-step; time-per-step depends on model size + batch, NOT corpus size. So adding FineWeb tokens doesn't increase training time as long as the step count stays at 100k. The cap is about keeping the data disk small and streaming time short.
+5. **If credits run low** (approaching $70 spent): deallocate the T4 immediately, keep the disks (they're cheap at ~$0.40/day), and resume training later within the 30-day trial window. The `--resume latest` checkpoint contract means you lose nothing but time.
+
+### 8.4 What to do if the 30-day trial is expiring
+
+1. Deallocate both VMs (stops all compute billing).
+2. The managed disks (OS + data) persist — they are not deleted by deallocate.
+3. If you need to keep the disks past the trial: they cost ~$0.40/day. For a few extra days, this is pennies.
+4. If the trial subscription is being deleted: snapshot the data disk and OS disk to Azure Blob or download the final checkpoint + tokenizer to your Mac (~300 MB total — the one time data leaves Azure).
+5. Resume on a fresh free trial or a different subscription by creating a new VM and attaching the saved disk / restoring the checkpoint.
 
 ---
 
