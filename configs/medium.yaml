@@ -1,4 +1,4 @@
-# ~20M param FINAL shipped model (Phase 4.3)
+# ~26M param FINAL shipped model (Phase 4.3)
 model:
   vocab_size: 32000
   num_layers: 8
@@ -8,3 +8,26 @@ model:
   dropout: 0.1
   rope_theta: 10000.0
   tie_weights: true
+
+training:
+  seed: 42
+  context_length: 1024
+  per_device_batch: 4
+  grad_accum: 16
+  max_steps: 100000
+  lr: 5.0e-4
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  warmup_steps: 2000
+  min_lr_ratio: 0.1
+  eval_every: 2000
+  ckpt_every: 2000
+  log_every: 10
+  grad_clip: 1.0
+  num_workers: 2
+  train_shards:
+    - tinystories.bin
+    - wikitext.bin
+    - fineweb.bin
+  val_shard: val.bin
