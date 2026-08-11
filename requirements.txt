@@ -1,10 +1,14 @@
+# Azure B2ms/T4: install torch 2.13.0+cu130 from the CUDA index.
+# Intel macOS has no torch>=2.13 wheel — floor stays broad for local unit tests.
 torch>=2.2.0
-numpy>=1.26.0
-datasets>=2.18.0
-tokenizers>=0.19.0
-pyyaml>=6.0
-pydantic>=2.6.0
-structlog>=24.1.0
-tensorboard>=2.16.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
+numpy>=2.2.0
+datasets>=4.0.0
+tokenizers>=0.21.0
+pyyaml>=6.0.2
+pydantic>=2.10.0
+structlog>=25.1.0
+tensorboard>=2.18.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+langdetect>=1.0.9
+regex>=2024.0.0

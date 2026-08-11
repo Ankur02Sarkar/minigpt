@@ -99,53 +99,52 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 ---
 
-### Phase 1 — Data Pipeline (on B2ms)
-*Goal: tokenized, deduplicated `.bin` shards on `/data/tokenized/` ready for training, total ≤ 20 GB. Runs entirely on the cheap B2ms VM.*
+### Phase 1 — Data Pipeline (on B2ms) ✅ COMPLETE
+*Goal: tokenized, deduplicated `.bin` shards on `/data/tokenized/` ready for training, total ≤ 20 GB. Prep ran on B2ms; disk moved to T4 for training.*
 
-- **1.1 TinyStories raw download** `[ ]`
-  - `datasets.load_dataset("roneneldan/TinyStories", split="train")` → `/data/raw/tinystories.txt`.
-  - Verify SHA-256 and line count (`wc -l` ≈ 2.1M).
-  - Disk check: ~7.6 GB.
-- **1.2 WikiText-103 raw download** `[ ]`
-  - `datasets.load_dataset("wikitext", "wikitext-103-v1", split="train")` → `/data/raw/wikitext103.txt`.
-  - Verify ~1.8M lines, ~0.55 GB.
-- **1.3 FineWeb-Edu streaming scaffold** `[ ]`
-  - `datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)`.
-  - Wrap in a generator that yields `(doc_id, text)`; **no persistence of raw docs**.
-  - Add a unit test that asserts the generator advances without buffering more than N docs in memory.
-- **1.4 FineWeb-Edu filter + on-the-fly tokenization (capped at 500M tokens)** `[ ]`
-  - Drop docs < 200 chars or > 100k chars.
-  - Apply lang-detect sanity (must be `en`, score ≥ 0.9).
-  - Tokenize in mini-batches of 1000 docs, append int32 IDs to `/data/tokenized/fineweb.bin`.
-  - **Stop the stream when the shard hits the 500M-token cap** (~2 GB int32). NOT 2–3B — the cap is budget-critical.
-- **1.5 Cleaning + dedupe pass** `[ ]`
-  - For TinyStories + WikiText: `regex` strip control chars, collapse whitespace, drop empty lines.
-  - Concat to `/data/cleaned/all_text.txt` (~8 GB).
-  - Dedupe at the doc level: SHA-1 of normalized text → keep first occurrence. Log dedupe ratio.
-- **1.6 BPE tokenizer training (vocab 32k)** `[ ]`
-  - `tokenizers.ByteLevelBPETokenizer.train(files=[...], vocab_size=32000, min_frequency=2)`.
-  - Save `vocab.json` + `merges.txt` to `/data/vocab/` (data disk). After moving the disk to the T4 VM, copy to `/opt/minigpt_llm/tokenizer/` (OS disk).
-  - Verify round-trip encode/decode on a 1k-doc sample.
-- **1.7 Tokenize all corpora → `.bin` shards** `[ ]`
-  - Read each cleaned text file, encode with the trained tokenizer, write as int32 array.
-  - Shards: `tinystories.bin`, `wikitext.bin`, `fineweb.bin` (already done in 1.4).
-  - Produce `meta.pkl` with `{shard: {"tokens": int, "dtype": "int32"}}`.
-- **1.8 Train/val split** `[ ]`
-  - 95/5 split on WikiText only (held-out validation).
-  - Save `val.bin` to `/data/tokenized/val.bin`.
-- **1.9 Data-loader smoke test** `[ ]`
-  - `python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4`.
-  - Assert shapes `(4, 1024)` for `input_ids` and `labels`.
-  - Assert no `nan` and that `labels` are `input_ids` shifted by one.
-- **1.10 Move data disk to T4 VM** `[ ]`
-  - `az vm disk detach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
-  - `az vm deallocate --resource-group minigpt-rg --name minigpt-prep` (stop B2ms billing).
-  - Create T4 VM: `az vm create --resource-group minigpt-rg --name minigpt-train --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest --size Standard_NC8as_T4_v3 --admin-username ubuntu --ssh-key-values ~/.ssh/id_ed25519.pub --public-ip-sku Standard --os-disk-size-gb 128 --os-disk-sku StandardSSD_LRS`.
-  - Install NVIDIA driver: `az vm extension set --resource-group minigpt-rg --vm-name minigpt-train --name NvidiaGpuDriverLinux --publisher Microsoft.HpcCompute`.
-  - Attach data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-train --name minigpt-data`.
-  - SSH in, mount `/data`, verify `nvidia-smi` shows 1× Tesla T4 16 GB.
+> **Runtime order used:** 1.1 → 1.2 → 1.5 → 1.6 → 1.7 → 1.8 → 1.3/1.4 → 1.9 → 1.10.  
+> FineWeb tokenization (**1.4**) runs **after** BPE training (**1.6**).  
+> Orchestrator: `python -m scripts.run_phase1_pipeline --data-root /data` (see `docs/PHASE1_RUNBOOK.md`).  
+> Raw + cleaned text deleted after tokenize (only `/data/tokenized/` + `/data/vocab/` retained). WikiText loaded as `Salesforce/wikitext` (hub 1.x requires namespaced ids).
 
-**Exit criteria:** `ls -lah /data/tokenized/` shows all shards + `meta.pkl`; `df -h /data` shows ≤ 20 GB used; smoke test passes; `nvidia-smi` works on the T4 VM.
+- **1.1 TinyStories raw download** `[x]`
+  - 2,119,489 lines, ~1.8 GB, sha256 `21c23f1a…` (then raw deleted).
+  - Module: `minigpt_llm.data.download.download_tinystories`.
+- **1.2 WikiText-103 raw download** `[x]`
+  - Via `Salesforce/wikitext` / `wikitext-103-v1` (bare `wikitext` fails on huggingface_hub≥1).
+  - 1,165,029 non-empty lines, ~511 MB (then raw deleted).
+  - Module: `minigpt_llm.data.download.download_wikitext`.
+- **1.3 FineWeb-Edu streaming scaffold** `[x]`
+  - Streaming generator, no raw FineWeb on disk.
+  - Module: `minigpt_llm.data.fineweb.iter_fineweb_docs`.
+- **1.4 FineWeb-Edu filter + on-the-fly tokenization (capped at 500M tokens)** `[x]`
+  - 500,000,000 tokens written → `/data/tokenized/fineweb.bin` (1.9 GB), cap hit.
+  - ~470k docs kept, 523 dropped (length/lang).
+  - Module: `minigpt_llm.data.fineweb.stream_and_tokenize_fineweb`.
+- **1.5 Cleaning + dedupe pass** `[x]`
+  - Kept 2,770,559 docs, dedupe ratio ~15.6% (then cleaned text deleted).
+  - Module: `minigpt_llm.data.clean.clean_and_dedupe_files`.
+- **1.6 BPE tokenizer training (vocab 32k)** `[x]`
+  - vocab 32k, round-trip 1000/1000 exact.
+  - `/data/vocab/{vocab.json,merges.txt}` + copy on train VM → `/opt/minigpt_llm/tokenizer/`.
+  - Module: `minigpt_llm.tokenizer.train_bpe.train_bpe`.
+- **1.7 Tokenize all corpora → `.bin` shards** `[x]`
+  - tinystories: 444,696,201 · wikitext (pre-split): 115,084,857 · fineweb: 500,000,000.
+  - `meta.pkl` present.
+  - Module: `minigpt_llm.data.shards`.
+- **1.8 Train/val split** `[x]`
+  - WikiText token 95/5 → train 109,330,614 + val 5,754,243.
+  - Module: `minigpt_llm.data.shards.split_wikitext_val`.
+- **1.9 Data-loader smoke test** `[x]`
+  - `(4, 1024)` input/labels, shift-1 verified on B2ms and T4.
+  - Module: `training.dataset`.
+- **1.10 Move data disk to T4 VM** `[x]`
+  - Prep disk detached + prep deallocated.
+  - `minigpt-train` `Standard_NC8as_T4_v3` zone 1 created; NVIDIA driver 610.57; disk attached at `/dev/sdc1` → `/data`.
+  - `nvidia-smi` → Tesla T4 16384 MiB; torch 2.11.0+cu128 CUDA True.
+  - Repo + tokenizer on train OS disk; **deallocate T4 when idle**.
+
+**Exit criteria (met):** shards + `meta.pkl` on `/data/tokenized/`; `df -h /data` ~4 GB used (after raw cleanup); smoke OK; T4 `nvidia-smi` OK. Total corpus tokens ≈ **1.06B**.
 
 ---
 

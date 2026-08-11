@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** The project is currently in **Phase 0 (Foundation & Infra)**. The model is not trained yet. End-to-end quickstart will be available after Phase 7.
+> **Note:** **Phase 1 (Data Pipeline) is complete.** Tokenized shards live on the Azure data disk (`/data/tokenized/`). Next: Phase 2 model architecture. The model is not trained yet.
 
 ```bash
 # Clone
@@ -16,13 +16,24 @@ cd minigpt
 # Set up env
 python3.12 -m venv .venv && source .venv/bin/activate
 uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip install -e .
+
+# Unit tests (synthetic data only — no HF download)
+pytest -q
+
+# --- on azure-prep only (never on a laptop) ---
+# export HF_TOKEN=...
+# python -m scripts.run_phase1_pipeline --data-root /data
+# python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
 
 # Train (Phase 3+)
-python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
+# python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
 
 # Serve (Phase 6+)
-uvicorn serving.server:app --host 0.0.0.0 --port 8080
+# uvicorn serving.server:app --host 0.0.0.0 --port 8080
 ```
+
+Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset licenses: [`docs/DATA_LICENSES.md`](docs/DATA_LICENSES.md).
 
 ---
 
@@ -55,14 +66,14 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | Major Phase | Minor Phases | Completed | Status |
 |---|---|---|---|
 | Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
-| Phase 1 — Data Pipeline | 10 | 0 | ⏳ Pending |
-| Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending |
+| Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
+| Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending (next) |
 | Phase 3 — Training Engine | 9 | 0 | ⏳ Pending |
 | Phase 4 — Training Runs | 7 | 0 | ⏳ Pending |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **8** | |
+| **Total** | **62** | **18** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -81,17 +92,48 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 - `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` → `2.13.0+cu130` ✅
 - `df -h /data` → 63 GB mounted ✅
 
+### Phase 1 — Data Pipeline (✅ Complete)
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1.1 | TinyStories raw download | ✅ | ~2.12M lines → tokenized; raw deleted after |
+| 1.2 | WikiText-103 raw download | ✅ | `Salesforce/wikitext` (hub 1.x); raw deleted after |
+| 1.3 | FineWeb-Edu streaming scaffold | ✅ | no raw FineWeb on disk |
+| 1.4 | FineWeb filter + 500M token cap | ✅ | **500M tokens** hit cap → `fineweb.bin` (1.9 GB) |
+| 1.5 | Clean + dedupe | ✅ | ~15.6% dedupe ratio; cleaned text deleted after tokenize |
+| 1.6 | BPE tokenizer (32k) | ✅ | 100% round-trip; `/data/vocab` + train OS copy |
+| 1.7 | Tokenize → `.bin` shards + `meta.pkl` | ✅ | tinystories 445M · wikitext 109M · fineweb 500M |
+| 1.8 | WikiText 95/5 → `val.bin` | ✅ | val 5.75M tokens |
+| 1.9 | Data-loader smoke test | ✅ | `(4, 1024)` on B2ms + T4 |
+| 1.10 | Move data disk to T4 | ✅ | `minigpt-train` NC8as_T4_v3 zone 1; `nvidia-smi` Tesla T4 16 GB |
+
+**Artifacts on data disk (`/data`, ~4 GB used after cleanup):**
+
+| Path | Tokens / notes |
+|---|---|
+| `/data/tokenized/tinystories.bin` | 444,696,201 |
+| `/data/tokenized/wikitext.bin` | 109,330,614 |
+| `/data/tokenized/val.bin` | 5,754,243 |
+| `/data/tokenized/fineweb.bin` | 500,000,000 |
+| `/data/tokenized/meta.pkl` | shard metadata |
+| `/data/vocab/{vocab.json,merges.txt}` | BPE 32k |
+
+```bash
+# on azure-train (when VM is started)
+python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
+```
+
 ### Local repo setup (Track B — ✅ Complete)
 
 | # | Task | Status |
 |---|---|---|
 | B1 | `.gitignore` expanded | ✅ |
-| B2 | Project skeleton created (`minigpt_llm/`, `training/`, `serving/`, `inference/`, `configs/`, `docker/`, `scripts/`, `tests/`, `docs/`, `.github/`) | ✅ |
-| B3 | `pyproject.toml`, `requirements.txt`, `requirements-dev.txt` created | ✅ |
+| B2 | Project skeleton created | ✅ |
+| B3 | `pyproject.toml`, `requirements*.txt` | ✅ |
 | B4 | Local venv with `uv` | ✅ |
-| B5 | `.pre-commit-config.yaml` created | ✅ |
-| B6 | `.github/workflows/ci.yml` created | ✅ |
-| B7 | `docker/Dockerfile.base` created | ✅ |
+| B5 | `.pre-commit-config.yaml` | ✅ |
+| B6 | `.github/workflows/ci.yml` | ✅ |
+| B7 | `docker/Dockerfile.base` | ✅ |
 | B8 | README.md skeleton + progress tracker | ✅ |
 | B9 | AGENTS.md `id_rsa` → `id_ed25519` | ✅ |
 
@@ -106,20 +148,6 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | A5 | Clone repo + uv venv on B2ms VM | ✅ |
 | A6 | Build Docker base image on B2ms + verify exit criteria | ✅ |
 
-### Next: Phase 1 — Data Pipeline (on B2ms)
-
-Phase 1 runs entirely on the cheap B2ms VM. It involves:
-1. Download TinyStories + WikiText-103 raw datasets
-2. Stream FineWeb-Edu (capped at 500M tokens)
-3. Clean + dedupe
-4. Train BPE tokenizer (32k vocab)
-5. Tokenize all corpora → `.bin` shards
-6. Train/val split
-7. Data-loader smoke test
-8. Move data disk to T4 VM
-
-**Before starting Phase 1:** Deallocate the T4 VM budget — Phase 1 is all CPU work on B2ms.
-
 ---
 
 ## Infrastructure Summary
@@ -128,15 +156,15 @@ Phase 1 runs entirely on the cheap B2ms VM. It involves:
 |---|---|
 | Azure subscription | "Azure subscription 1" (free trial, $200 credit) |
 | Resource group | `minigpt-rg` (eastus) ✅ |
-| Prep VM | `minigpt-prep` (Standard_B2ms, zone 1, ~$0.083/hr) — IP: 172.178.112.133 ✅ |
-| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, ~$0.752/hr) — not yet created (Phase 1.10) |
-| Data disk | `minigpt-data` (64 GB Standard SSD, zone 1, portable) — attached to prep VM ✅ |
+| Prep VM | `minigpt-prep` (Standard_B2ms, zone 1) — **deallocated** after data prep ✅ |
+| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, zone 1, ~$0.752/hr) — IP: 48.217.83.172; **deallocated after Phase 1 verify** (start only to train) ✅ |
+| Data disk | `minigpt-data` (64 GB Standard SSD, zone 1) — attached to **train** VM at `/data` ✅ |
 | SSH key | `~/.ssh/id_ed25519` (ed25519, no passphrase) |
-| SSH config | `Host azure-prep` → 172.178.112.133 |
-| Public IP (for NSG) | `49.37.169.202` (ports 22, 8080, 11434 open) |
-| Quota | NCASv3_T4: 0/8 ✓, BS Family: 0/10 ✓, Total Regional vCPUs: 0/18 ✓ |
+| SSH config | `Host azure-train` → 48.217.83.172 · `Host azure-prep` (deallocated) |
+| Public IP (for NSG) | `101.0.63.207` + `49.37.169.202` (ports 22, 8080, 11434) |
+| GPU | Tesla T4 16 GB, driver 610.57, torch 2.11.0+cu128 ✅ |
 | Budget target | $35-50 (within $200 free-trial credit) |
-| Docker base image | `minigpt/base:latest` (9.03 GB, torch 2.13.0+cu130) ✅ |
+| Docker base image | `minigpt/base:latest` (9.03 GB) ✅ |
 
 ---
 
