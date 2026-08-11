@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** The project is in **Phase 1 (Data Pipeline)**. Library + unit tests are in-repo; **real datasets only run on Azure B2ms** (`/data`). The model is not trained yet.
+> **Note:** **Phase 1 (Data Pipeline) is complete.** Tokenized shards live on the Azure data disk (`/data/tokenized/`). Next: Phase 2 model architecture. The model is not trained yet.
 
 ```bash
 # Clone
@@ -66,16 +66,14 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Major Phase | Minor Phases | Completed | Status |
 |---|---|---|---|
 | Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
-| Phase 1 — Data Pipeline | 10 | 0* | 🔄 In progress (code ready; Azure run pending) |
-| Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending |
+| Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
+| Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending (next) |
 | Phase 3 — Training Engine | 9 | 0 | ⏳ Pending |
 | Phase 4 — Training Runs | 7 | 0 | ⏳ Pending |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **8** | |
-
-\*Phase 1 library/CLIs/tests are implemented on branch `phase/1-data-pipeline`. Minor phases flip to ✅ only after the B2ms pipeline produces shards and (for 1.10) the T4 is attached.
+| **Total** | **62** | **18** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -94,33 +92,35 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 - `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` → `2.13.0+cu130` ✅
 - `df -h /data` → 63 GB mounted ✅
 
-### Phase 1 — Data Pipeline (🔄 In progress)
+### Phase 1 — Data Pipeline (✅ Complete)
 
-| # | Task | Code | Azure | Notes |
-|---|---|---|---|---|
-| 1.1 | TinyStories raw download | ✅ | ⏳ | `minigpt_llm.data.download` |
-| 1.2 | WikiText-103 raw download | ✅ | ⏳ | same |
-| 1.3 | FineWeb-Edu streaming scaffold | ✅ | ⏳ | generator, no raw persist |
-| 1.4 | FineWeb filter + 500M token cap | ✅ | ⏳ | **runs after BPE train** (see order below) |
-| 1.5 | Clean + dedupe | ✅ | ⏳ | SHA-1 doc dedupe → `all_text.txt` |
-| 1.6 | BPE tokenizer (32k) | ✅ | ⏳ | `minigpt_llm.tokenizer` |
-| 1.7 | Tokenize → `.bin` shards + `meta.pkl` | ✅ | ⏳ | int32 little-endian |
-| 1.8 | WikiText 95/5 → `val.bin` | ✅ | ⏳ | token-level split |
-| 1.9 | Data-loader smoke test | ✅ | ⏳ | `python -m training.dataset` |
-| 1.10 | Move data disk to T4 | 📄 runbook | ⏳ | `docs/PHASE1_RUNBOOK.md` |
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 1.1 | TinyStories raw download | ✅ | ~2.12M lines → tokenized; raw deleted after |
+| 1.2 | WikiText-103 raw download | ✅ | `Salesforce/wikitext` (hub 1.x); raw deleted after |
+| 1.3 | FineWeb-Edu streaming scaffold | ✅ | no raw FineWeb on disk |
+| 1.4 | FineWeb filter + 500M token cap | ✅ | **500M tokens** hit cap → `fineweb.bin` (1.9 GB) |
+| 1.5 | Clean + dedupe | ✅ | ~15.6% dedupe ratio; cleaned text deleted after tokenize |
+| 1.6 | BPE tokenizer (32k) | ✅ | 100% round-trip; `/data/vocab` + train OS copy |
+| 1.7 | Tokenize → `.bin` shards + `meta.pkl` | ✅ | tinystories 445M · wikitext 109M · fineweb 500M |
+| 1.8 | WikiText 95/5 → `val.bin` | ✅ | val 5.75M tokens |
+| 1.9 | Data-loader smoke test | ✅ | `(4, 1024)` on B2ms + T4 |
+| 1.10 | Move data disk to T4 | ✅ | `minigpt-train` NC8as_T4_v3 zone 1; `nvidia-smi` Tesla T4 16 GB |
 
-**Runtime order on B2ms** (tokenizer must exist before FineWeb encode):
+**Artifacts on data disk (`/data`, ~4 GB used after cleanup):**
 
-1. Download TinyStories + WikiText  
-2. Clean + dedupe  
-3. Train BPE  
-4. Tokenize TinyStories + WikiText + val split  
-5. Stream FineWeb → `fineweb.bin` (500M cap)  
-6. Smoke test  
+| Path | Tokens / notes |
+|---|---|
+| `/data/tokenized/tinystories.bin` | 444,696,201 |
+| `/data/tokenized/wikitext.bin` | 109,330,614 |
+| `/data/tokenized/val.bin` | 5,754,243 |
+| `/data/tokenized/fineweb.bin` | 500,000,000 |
+| `/data/tokenized/meta.pkl` | shard metadata |
+| `/data/vocab/{vocab.json,merges.txt}` | BPE 32k |
 
 ```bash
-# azure-prep
-python -m scripts.run_phase1_pipeline --data-root /data
+# on azure-train (when VM is started)
+python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
 ```
 
 ### Local repo setup (Track B — ✅ Complete)
@@ -156,15 +156,15 @@ python -m scripts.run_phase1_pipeline --data-root /data
 |---|---|
 | Azure subscription | "Azure subscription 1" (free trial, $200 credit) |
 | Resource group | `minigpt-rg` (eastus) ✅ |
-| Prep VM | `minigpt-prep` (Standard_B2ms, zone 1, ~$0.083/hr) — IP: 172.178.112.133 ✅ |
-| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, ~$0.752/hr) — not yet created (Phase 1.10) |
-| Data disk | `minigpt-data` (64 GB Standard SSD, zone 1, portable) — attached to prep VM ✅ |
+| Prep VM | `minigpt-prep` (Standard_B2ms, zone 1) — **deallocated** after data prep ✅ |
+| Train VM | `minigpt-train` (Standard_NC8as_T4_v3, zone 1, ~$0.752/hr) — IP: 48.217.83.172; **deallocated after Phase 1 verify** (start only to train) ✅ |
+| Data disk | `minigpt-data` (64 GB Standard SSD, zone 1) — attached to **train** VM at `/data` ✅ |
 | SSH key | `~/.ssh/id_ed25519` (ed25519, no passphrase) |
-| SSH config | `Host azure-prep` → 172.178.112.133 |
+| SSH config | `Host azure-train` → 48.217.83.172 · `Host azure-prep` (deallocated) |
 | Public IP (for NSG) | `101.0.63.207` + `49.37.169.202` (ports 22, 8080, 11434) |
-| Quota | NCASv3_T4: 0/8 ✓, BS Family: 0/10 ✓, Total Regional vCPUs: 0/18 ✓ |
+| GPU | Tesla T4 16 GB, driver 610.57, torch 2.11.0+cu128 ✅ |
 | Budget target | $35-50 (within $200 free-trial credit) |
-| Docker base image | `minigpt/base:latest` (9.03 GB, torch 2.13.0+cu130) ✅ |
+| Docker base image | `minigpt/base:latest` (9.03 GB) ✅ |
 
 ---
 

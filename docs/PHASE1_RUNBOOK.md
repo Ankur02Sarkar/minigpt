@@ -1,6 +1,8 @@
-# Phase 1 Runbook (Azure B2ms)
+# Phase 1 Runbook (Azure B2ms → T4)
 
-Code is developed on the Mac. **All dataset I/O runs on `minigpt-prep` (B2ms)** with `/data` mounted.
+> **Status: Phase 1 complete (2026-08-11).** Shards on `/data/tokenized/`, prep deallocated, train VM has T4 + data disk. **Deallocate `minigpt-train` when not training.**
+
+Code is developed on the Mac. **All dataset I/O ran on `minigpt-prep` (B2ms)** with `/data` mounted; disk then moved to `minigpt-train`.
 
 ## Prerequisites
 
