@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** The project is currently in **Phase 0 (Foundation & Infra)**. The model is not trained yet. End-to-end quickstart will be available after Phase 7.
+> **Note:** The project is in **Phase 1 (Data Pipeline)**. Library + unit tests are in-repo; **real datasets only run on Azure B2ms** (`/data`). The model is not trained yet.
 
 ```bash
 # Clone
@@ -16,13 +16,24 @@ cd minigpt
 # Set up env
 python3.12 -m venv .venv && source .venv/bin/activate
 uv pip install -r requirements.txt -r requirements-dev.txt
+uv pip install -e .
+
+# Unit tests (synthetic data only — no HF download)
+pytest -q
+
+# --- on azure-prep only (never on a laptop) ---
+# export HF_TOKEN=...
+# python -m scripts.run_phase1_pipeline --data-root /data
+# python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
 
 # Train (Phase 3+)
-python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
+# python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
 
 # Serve (Phase 6+)
-uvicorn serving.server:app --host 0.0.0.0 --port 8080
+# uvicorn serving.server:app --host 0.0.0.0 --port 8080
 ```
+
+Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset licenses: [`docs/DATA_LICENSES.md`](docs/DATA_LICENSES.md).
 
 ---
 
@@ -55,7 +66,7 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | Major Phase | Minor Phases | Completed | Status |
 |---|---|---|---|
 | Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
-| Phase 1 — Data Pipeline | 10 | 0 | ⏳ Pending |
+| Phase 1 — Data Pipeline | 10 | 0* | 🔄 In progress (code ready; Azure run pending) |
 | Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending |
 | Phase 3 — Training Engine | 9 | 0 | ⏳ Pending |
 | Phase 4 — Training Runs | 7 | 0 | ⏳ Pending |
@@ -63,6 +74,8 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
 | **Total** | **62** | **8** | |
+
+\*Phase 1 library/CLIs/tests are implemented on branch `phase/1-data-pipeline`. Minor phases flip to ✅ only after the B2ms pipeline produces shards and (for 1.10) the T4 is attached.
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -81,17 +94,46 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 - `docker run --rm minigpt/base:latest python -c "import torch; print(torch.__version__)"` → `2.13.0+cu130` ✅
 - `df -h /data` → 63 GB mounted ✅
 
+### Phase 1 — Data Pipeline (🔄 In progress)
+
+| # | Task | Code | Azure | Notes |
+|---|---|---|---|---|
+| 1.1 | TinyStories raw download | ✅ | ⏳ | `minigpt_llm.data.download` |
+| 1.2 | WikiText-103 raw download | ✅ | ⏳ | same |
+| 1.3 | FineWeb-Edu streaming scaffold | ✅ | ⏳ | generator, no raw persist |
+| 1.4 | FineWeb filter + 500M token cap | ✅ | ⏳ | **runs after BPE train** (see order below) |
+| 1.5 | Clean + dedupe | ✅ | ⏳ | SHA-1 doc dedupe → `all_text.txt` |
+| 1.6 | BPE tokenizer (32k) | ✅ | ⏳ | `minigpt_llm.tokenizer` |
+| 1.7 | Tokenize → `.bin` shards + `meta.pkl` | ✅ | ⏳ | int32 little-endian |
+| 1.8 | WikiText 95/5 → `val.bin` | ✅ | ⏳ | token-level split |
+| 1.9 | Data-loader smoke test | ✅ | ⏳ | `python -m training.dataset` |
+| 1.10 | Move data disk to T4 | 📄 runbook | ⏳ | `docs/PHASE1_RUNBOOK.md` |
+
+**Runtime order on B2ms** (tokenizer must exist before FineWeb encode):
+
+1. Download TinyStories + WikiText  
+2. Clean + dedupe  
+3. Train BPE  
+4. Tokenize TinyStories + WikiText + val split  
+5. Stream FineWeb → `fineweb.bin` (500M cap)  
+6. Smoke test  
+
+```bash
+# azure-prep
+python -m scripts.run_phase1_pipeline --data-root /data
+```
+
 ### Local repo setup (Track B — ✅ Complete)
 
 | # | Task | Status |
 |---|---|---|
 | B1 | `.gitignore` expanded | ✅ |
-| B2 | Project skeleton created (`minigpt_llm/`, `training/`, `serving/`, `inference/`, `configs/`, `docker/`, `scripts/`, `tests/`, `docs/`, `.github/`) | ✅ |
-| B3 | `pyproject.toml`, `requirements.txt`, `requirements-dev.txt` created | ✅ |
+| B2 | Project skeleton created | ✅ |
+| B3 | `pyproject.toml`, `requirements*.txt` | ✅ |
 | B4 | Local venv with `uv` | ✅ |
-| B5 | `.pre-commit-config.yaml` created | ✅ |
-| B6 | `.github/workflows/ci.yml` created | ✅ |
-| B7 | `docker/Dockerfile.base` created | ✅ |
+| B5 | `.pre-commit-config.yaml` | ✅ |
+| B6 | `.github/workflows/ci.yml` | ✅ |
+| B7 | `docker/Dockerfile.base` | ✅ |
 | B8 | README.md skeleton + progress tracker | ✅ |
 | B9 | AGENTS.md `id_rsa` → `id_ed25519` | ✅ |
 
@@ -106,20 +148,6 @@ uvicorn serving.server:app --host 0.0.0.0 --port 8080
 | A5 | Clone repo + uv venv on B2ms VM | ✅ |
 | A6 | Build Docker base image on B2ms + verify exit criteria | ✅ |
 
-### Next: Phase 1 — Data Pipeline (on B2ms)
-
-Phase 1 runs entirely on the cheap B2ms VM. It involves:
-1. Download TinyStories + WikiText-103 raw datasets
-2. Stream FineWeb-Edu (capped at 500M tokens)
-3. Clean + dedupe
-4. Train BPE tokenizer (32k vocab)
-5. Tokenize all corpora → `.bin` shards
-6. Train/val split
-7. Data-loader smoke test
-8. Move data disk to T4 VM
-
-**Before starting Phase 1:** Deallocate the T4 VM budget — Phase 1 is all CPU work on B2ms.
-
 ---
 
 ## Infrastructure Summary
@@ -133,7 +161,7 @@ Phase 1 runs entirely on the cheap B2ms VM. It involves:
 | Data disk | `minigpt-data` (64 GB Standard SSD, zone 1, portable) — attached to prep VM ✅ |
 | SSH key | `~/.ssh/id_ed25519` (ed25519, no passphrase) |
 | SSH config | `Host azure-prep` → 172.178.112.133 |
-| Public IP (for NSG) | `49.37.169.202` (ports 22, 8080, 11434 open) |
+| Public IP (for NSG) | `101.0.63.207` + `49.37.169.202` (ports 22, 8080, 11434) |
 | Quota | NCASv3_T4: 0/8 ✓, BS Family: 0/10 ✓, Total Regional vCPUs: 0/18 ✓ |
 | Budget target | $35-50 (within $200 free-trial credit) |
 | Docker base image | `minigpt/base:latest` (9.03 GB, torch 2.13.0+cu130) ✅ |

@@ -30,7 +30,8 @@ jobs:
         run: ruff format --check .
 
       - name: Mypy typecheck
+        # Soft until model/serving are fully typed (Phase 2+)
         run: mypy minigpt_llm/ training/ serving/ inference/ || true
 
       - name: Pytest
-        run: pytest -x || true
+        run: pytest -x

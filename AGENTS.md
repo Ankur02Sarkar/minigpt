@@ -102,41 +102,55 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 1 — Data Pipeline (on B2ms)
 *Goal: tokenized, deduplicated `.bin` shards on `/data/tokenized/` ready for training, total ≤ 20 GB. Runs entirely on the cheap B2ms VM.*
 
-- **1.1 TinyStories raw download** `[ ]`
+> **Code status:** library + unit tests + orchestrator implemented (`[~]` = code ready, Azure execution still required for green checkpoint).  
+> **Runtime order:** 1.1 → 1.2 → 1.5 → 1.6 → 1.7 → 1.8 → 1.3/1.4 → 1.9 → 1.10.  
+> FineWeb tokenization (**1.4**) must run **after** BPE training (**1.6**) — you cannot encode FineWeb without the trained vocab.  
+> Orchestrator: `python -m scripts.run_phase1_pipeline --data-root /data` (see `docs/PHASE1_RUNBOOK.md`).
+
+- **1.1 TinyStories raw download** `[~]`
   - `datasets.load_dataset("roneneldan/TinyStories", split="train")` → `/data/raw/tinystories.txt`.
   - Verify SHA-256 and line count (`wc -l` ≈ 2.1M).
   - Disk check: ~7.6 GB.
-- **1.2 WikiText-103 raw download** `[ ]`
+  - Module: `minigpt_llm.data.download.download_tinystories`.
+- **1.2 WikiText-103 raw download** `[~]`
   - `datasets.load_dataset("wikitext", "wikitext-103-v1", split="train")` → `/data/raw/wikitext103.txt`.
   - Verify ~1.8M lines, ~0.55 GB.
-- **1.3 FineWeb-Edu streaming scaffold** `[ ]`
+  - Module: `minigpt_llm.data.download.download_wikitext`.
+- **1.3 FineWeb-Edu streaming scaffold** `[~]`
   - `datasets.load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)`.
   - Wrap in a generator that yields `(doc_id, text)`; **no persistence of raw docs**.
-  - Add a unit test that asserts the generator advances without buffering more than N docs in memory.
-- **1.4 FineWeb-Edu filter + on-the-fly tokenization (capped at 500M tokens)** `[ ]`
+  - Unit test: generator advances without buffering more than N docs (`tests/test_data_fineweb.py`).
+  - Module: `minigpt_llm.data.fineweb.iter_fineweb_docs`.
+- **1.4 FineWeb-Edu filter + on-the-fly tokenization (capped at 500M tokens)** `[~]`
   - Drop docs < 200 chars or > 100k chars.
   - Apply lang-detect sanity (must be `en`, score ≥ 0.9).
   - Tokenize in mini-batches of 1000 docs, append int32 IDs to `/data/tokenized/fineweb.bin`.
   - **Stop the stream when the shard hits the 500M-token cap** (~2 GB int32). NOT 2–3B — the cap is budget-critical.
-- **1.5 Cleaning + dedupe pass** `[ ]`
+  - **Requires trained tokenizer from 1.6.** Module: `minigpt_llm.data.fineweb.stream_and_tokenize_fineweb`.
+- **1.5 Cleaning + dedupe pass** `[~]`
   - For TinyStories + WikiText: `regex` strip control chars, collapse whitespace, drop empty lines.
   - Concat to `/data/cleaned/all_text.txt` (~8 GB).
   - Dedupe at the doc level: SHA-1 of normalized text → keep first occurrence. Log dedupe ratio.
-- **1.6 BPE tokenizer training (vocab 32k)** `[ ]`
+  - Module: `minigpt_llm.data.clean.clean_and_dedupe_files`.
+- **1.6 BPE tokenizer training (vocab 32k)** `[~]`
   - `tokenizers.ByteLevelBPETokenizer.train(files=[...], vocab_size=32000, min_frequency=2)`.
   - Save `vocab.json` + `merges.txt` to `/data/vocab/` (data disk). After moving the disk to the T4 VM, copy to `/opt/minigpt_llm/tokenizer/` (OS disk).
   - Verify round-trip encode/decode on a 1k-doc sample.
-- **1.7 Tokenize all corpora → `.bin` shards** `[ ]`
+  - Module: `minigpt_llm.tokenizer.train_bpe.train_bpe`.
+- **1.7 Tokenize all corpora → `.bin` shards** `[~]`
   - Read each cleaned text file, encode with the trained tokenizer, write as int32 array.
-  - Shards: `tinystories.bin`, `wikitext.bin`, `fineweb.bin` (already done in 1.4).
+  - Shards: `tinystories.bin`, `wikitext.bin`, `fineweb.bin` (FineWeb via 1.4 after BPE).
   - Produce `meta.pkl` with `{shard: {"tokens": int, "dtype": "int32"}}`.
-- **1.8 Train/val split** `[ ]`
-  - 95/5 split on WikiText only (held-out validation).
+  - Module: `minigpt_llm.data.shards`.
+- **1.8 Train/val split** `[~]`
+  - 95/5 split on WikiText only (held-out validation) at the **token** level.
   - Save `val.bin` to `/data/tokenized/val.bin`.
-- **1.9 Data-loader smoke test** `[ ]`
+  - Module: `minigpt_llm.data.shards.split_wikitext_val`.
+- **1.9 Data-loader smoke test** `[~]`
   - `python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4`.
   - Assert shapes `(4, 1024)` for `input_ids` and `labels`.
   - Assert no `nan` and that `labels` are `input_ids` shifted by one.
+  - Module: `training.dataset` (minimal memmap; Phase 3 extends).
 - **1.10 Move data disk to T4 VM** `[ ]`
   - `az vm disk detach --resource-group minigpt-rg --vm-name minigpt-prep --name minigpt-data`.
   - `az vm deallocate --resource-group minigpt-rg --name minigpt-prep` (stop B2ms billing).
@@ -144,6 +158,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - Install NVIDIA driver: `az vm extension set --resource-group minigpt-rg --vm-name minigpt-train --name NvidiaGpuDriverLinux --publisher Microsoft.HpcCompute`.
   - Attach data disk: `az vm disk attach --resource-group minigpt-rg --vm-name minigpt-train --name minigpt-data`.
   - SSH in, mount `/data`, verify `nvidia-smi` shows 1× Tesla T4 16 GB.
+  - Runbook: `docs/PHASE1_RUNBOOK.md`.
 
 **Exit criteria:** `ls -lah /data/tokenized/` shows all shards + `meta.pkl`; `df -h /data` shows ≤ 20 GB used; smoke test passes; `nvidia-smi` works on the T4 VM.
 
