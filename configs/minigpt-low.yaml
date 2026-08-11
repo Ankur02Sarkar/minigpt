@@ -1,4 +1,7 @@
-# ~13M param sanity model (Phase 4.2 / smoke)
+# minigpt-low — smaller sanity model (~13M params)
+# Train: TinyStories only, ~50k steps, target val PPL ≤ 25
+name: minigpt-low
+
 model:
   vocab_size: 32000
   num_layers: 6

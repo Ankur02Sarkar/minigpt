@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** **Phase 1–3 complete.** Data on Azure `/data/tokenized/`; GPT model + training engine in-repo. Next: Phase 4 production training runs on T4. Long runs not started yet.
+> **Note:** **Phase 1–3 complete; Phase 4 training runs in progress on Azure T4** under systemd (`minigpt-low` → `minigpt-high`). You can close the laptop — training continues with `--resume latest`.
 
 ```bash
 # Clone
@@ -27,11 +27,11 @@ pytest -q
 # python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
 
 # Model smoke (Phase 2+)
-# python -c "from minigpt_llm.model import GPT, load_config; print(GPT(load_config('configs/tiny.yaml')).num_parameters())"
+# python -c "from minigpt_llm.model import GPT, load_config; print(GPT(load_config('configs/minigpt-low.yaml')).num_parameters())"
 
 # Train (Phase 3+) — on azure-train with /data mounted
 # python -m training.train \
-#   --config configs/tiny.yaml \
+#   --config configs/minigpt-low.yaml \
 #   --data-dir /data/tokenized \
 #   --out-dir /opt/minigpt_llm/checkpoints/smoke \
 #   --max-steps 1000 --device cuda
@@ -76,11 +76,11 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
 | Phase 3 — Training Engine | 9 | 9 | ✅ Done |
-| Phase 4 — Training Runs | 7 | 0 | ⏳ Pending (next) |
+| Phase 4 — Training Runs | 7 | 2 | 🔄 In progress (systemd queue) |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **35** | |
+| **Total** | **62** | **37** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -147,12 +147,12 @@ python -m training.dataset --shard /data/tokenized/tinystories.bin --context 102
 
 | Config | Spec | Params |
 |---|---|---|
-| `configs/tiny.yaml` | 6L, 256-dim, 4 heads, ctx 512 | **13,012,224** |
-| `configs/medium.yaml` | 8L, 384-dim, 6 heads, ctx 1024 | **26,450,304** |
+| **minigpt-low** (`configs/minigpt-low.yaml`) | 6L, 256-dim, 4 heads, ctx 512 | **13,012,224** |
+| **minigpt-high** (`configs/minigpt-high.yaml`) | 8L, 384-dim, 6 heads, ctx 1024 | **26,450,304** |
 
 ```bash
 from minigpt_llm.model import GPT, load_config
-model = GPT(load_config("configs/medium.yaml"))
+model = GPT(load_config("configs/minigpt-high.yaml"))
 print(model.num_parameters())  # 26450304
 ```
 
@@ -175,17 +175,29 @@ pytest -q tests/model tests/test_overfit.py
 | 3.9 | Smoke | ✅ | `tests/test_train_smoke.py` |
 
 ```bash
-# on azure-train (start VM first; deallocate when done)
-python -m training.train \
-  --config configs/tiny.yaml \
-  --data-dir /data/tokenized \
-  --out-dir /opt/minigpt_llm/checkpoints/smoke \
-  --max-steps 1000 \
-  --device cuda \
-  --resume latest
+# Production queue (preferred) — survives SSH disconnect
+# See docs/PHASE4_RUNBOOK.md
+sudo systemctl enable --now minigpt-train-queue
+cat /opt/minigpt_llm/STATUS.json
 ```
 
-Defaults (T4): `per_device_batch=4`, `grad_accum=16` → effective batch 64, FP16 autocast.
+Models: **minigpt-low** (50k steps, TinyStories) then **minigpt-high** (100k steps, full corpus).  
+Defaults (T4): `per_device_batch=4`, `grad_accum=16` → effective batch 64, FP16 autocast.  
+**Do not deallocate T4 until both `best.pt` exist.**
+
+### Phase 4 — Training Runs (🔄 In progress)
+
+| Model | Config | Steps | Target val PPL | Checkpoint dir |
+|---|---|---|---|---|
+| **minigpt-low** | `minigpt-low.yaml` | 50k | ≤ 25 | `checkpoints/minigpt-low/` |
+| **minigpt-high** | `minigpt-high.yaml` | 100k | ≤ 18 | `checkpoints/minigpt-high/` |
+
+Ops: [`docs/PHASE4_RUNBOOK.md`](docs/PHASE4_RUNBOOK.md) · systemd unit `minigpt-train-queue` · heartbeat `STATUS.json`.
+
+After 30–40h, verify from Mac:
+```bash
+ssh azure-train 'cat /opt/minigpt_llm/STATUS.json; ls checkpoints/minigpt-*/best.pt'
+```
 
 ### Local repo setup (Track B — ✅ Complete)
 

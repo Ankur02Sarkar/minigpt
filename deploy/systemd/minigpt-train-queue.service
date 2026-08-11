@@ -1,0 +1,29 @@
+[Unit]
+Description=minigpt sequential training (minigpt-low then minigpt-high)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/minigpt_llm
+Environment=MINIGPT_ROOT=/opt/minigpt_llm
+Environment=MINIGPT_DATA_DIR=/data/tokenized
+Environment=MINIGPT_PYTHON=/opt/minigpt_llm/.venv/bin/python
+# Refuse to start if /data is nearly full
+ExecStartPre=/bin/bash -c 'df -P /data | awk "NR==2{exit !($5+0 < 95)}"'
+ExecStart=/bin/bash /opt/minigpt_llm/scripts/run_phase_queue.sh
+Restart=on-failure
+RestartSec=60
+StartLimitBurst=10
+StartLimitIntervalSec=600
+OOMScoreAdjust=-500
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minigpt-train-queue
+# Nice: lower CPU contention with system services slightly
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

@@ -153,7 +153,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 - **2.1 Config system (`minigpt_llm/model/config.py`)** `[x]`
   - `@dataclass(frozen=True)` `ModelConfig` with `vocab_size`, `num_layers`, `hidden_size`, `num_heads`, `max_position_embeddings`, `dropout`, `rope_theta`, `tie_weights`.
-  - YAML loader: `load_config("configs/medium.yaml")` returns a typed `ModelConfig` (nested `model:`).
+  - YAML loader: `load_config("configs/minigpt-high.yaml")` returns a typed `ModelConfig` (nested `model:`).
   - Param-count helper: `estimate_params(config) -> int` (exact match vs. real instantiation).
 - **2.2 Token + positional embeddings** `[x]`
   - `nn.Embedding(vocab_size, hidden_size)` for tokens.
@@ -179,7 +179,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 - **2.8 Sanity overfit on a single batch** `[x]`
   - `tests/test_overfit.py`: 2L/64-dim mini model, 200 AdamW steps, loss &lt; 2.0 on CPU.
 
-**Measured params (vocab 32k, tied head):** `tiny.yaml` **13,012,224**; `medium.yaml` **26,450,304** (AGENTS “~8M/~20M” undercounted the embedding table).  
+**Measured params (vocab 32k, tied head):** `minigpt-low.yaml` **13,012,224**; `minigpt-high.yaml` **26,450,304** (older “~8M/~20M” undercounted the embedding table).  
 **Exit criteria:** `pytest tests/model tests/test_overfit.py` green (24 tests); estimate matches real; generate + overfit OK.
 
 ---
@@ -207,39 +207,39 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - `tests/test_train_smoke.py` synthetic shards, 40 steps, checkpoint written (CI).
   - Real TinyStories 1000-step on T4 is optional ops (Phase 4 prep).
 
-**YAML:** `training:` block in `configs/tiny.yaml` and `configs/medium.yaml` via `training.config.load_train_config`.  
+**YAML:** `training:` block in `configs/minigpt-low.yaml` and `configs/minigpt-high.yaml` via `training.config.load_train_config`.  
 **Exit criteria:** train CLI + eval + ckpt + TB path implemented; unit/smoke tests green.
 
-### Phase 4 — Training Runs (progressive scaling)
-*Goal: two production-quality models, fully logged, ready to serve. The 20M model is the final deliverable — no 50M Phase 3.*
+### Phase 4 — Training Runs (progressive scaling) `[~]`
+*Goal: two production-quality models, fully logged, ready to serve. **minigpt-high** is the final deliverable — no 50M third model.*
 
-- **4.1 Phase-runner script (`scripts/run_phase.sh`)** `[ ]`
-  - Wraps `train.py` with per-phase `max_steps`, eval cadence, and checkpoint retention.
-  - Writes `logs/<phase>/RUN.md` with start/end time, peak GPU mem, final loss/PPL, T4-hours consumed.
-- **4.2 Phase 1 — 8M model on TinyStories (T4, ~4 h)** `[ ]`
-  - Config: `tiny.yaml` (6L, 256-dim, 4 heads, ctx 512).
+**Naming:** small model = **minigpt-low** · large model = **minigpt-high**.  
+**Long runs:** systemd `minigpt-train-queue` + `--resume latest` (not bare SSH). See `docs/PHASE4_RUNBOOK.md`.
+
+- **4.1 Phase-runner script (`scripts/run_phase.sh`)** `[x]`
+  - Wraps `train.py` per model name; writes `logs/<name>/RUN.md`.
+  - Queue: `scripts/run_phase_queue.sh` (low then high).
+- **4.2 minigpt-low on TinyStories (T4, ~4 h)** `[~]`
+  - Config: `configs/minigpt-low.yaml` (6L, 256-dim, 4 heads, ctx 512, ~13M).
   - 50k steps, eval every 1k, target val PPL ≤ 25.
-  - Documented in `logs/phase1/RUN.md`.
-- **4.3 Phase 2 — 20M model on TinyStories + WikiText + capped FineWeb (T4, ~20 h) — FINAL** `[ ]`
-  - Config: `medium.yaml` (8L, 384-dim, 6 heads, ctx 1024).
+  - Checkpoints: `/opt/minigpt_llm/checkpoints/minigpt-low/`.
+- **4.3 minigpt-high on TinyStories + WikiText + FineWeb (T4, ~20 h) — FINAL** `[~]`
+  - Config: `configs/minigpt-high.yaml` (8L, 384-dim, 6 heads, ctx 1024, ~26M).
   - 100k steps, eval every 2k, target val PPL ≤ 18.
-  - This is the shipped model. Documented in `logs/phase2/RUN.md`.
+  - Checkpoints: `/opt/minigpt_llm/checkpoints/minigpt-high/`.
 - **4.4 Hyperparam tuning pass (budget-aware, short)** `[ ]`
-  - Sweep LR in {3e-4, 5e-4, 7e-4}, warmup in {1k, 2k} on Phase 2.
-  - **Keep total sweep under 4 T4-hours** — use short runs (5k steps each) to compare, not full 100k runs.
-  - Pick best, freeze, promote to `configs/medium.yaml`.
-- **4.5 ~~Phase 3 — 50M model~~ — REMOVED** `[!]`
-  - **Not in scope.** The 50M model on 2–3B FineWeb tokens was removed to keep spend under $70. If credits remain after Phase 2, a reduced 30M stretch run is possible but not planned.
-- **4.6 Long-run monitoring** `[ ]`
-  - `tmux`/`screen` session named `train-<phase>`.
-  - Cron every 5 min: `nvidia-smi`, `df -h /data`, `df -h /`, last log line → `logs/heartbeat.log`.
-  - Auto-snapshot checkpoint to **Azure Blob Storage** every 4h via `azcopy` (off-host backup, ~$0.02/GB/mo).
-  - **Deallocate the T4 VM between long gaps** (overnight pauses, multi-day breaks). `--resume latest` picks up cleanly from the last checkpoint.
+  - Optional if credits allow; &lt; 4 T4-hours; short 5k-step probes.
+  - Promote best into `configs/minigpt-high.yaml`.
+- **4.5 ~~50M model~~ — REMOVED** `[!]`
+  - Not in scope.
+- **4.6 Long-run monitoring** `[x]` code / `[~]` live
+  - **systemd** `minigpt-train-queue.service` (not tmux-only).
+  - Heartbeat cron → `/opt/minigpt_llm/STATUS.json`.
+  - `--resume latest`; deallocate T4 only after both complete.
 - **4.7 Final eval report** `[ ]`
-  - `docs/EVAL.md` with side-by-side loss/PPL curves for both phases.
-  - Sample generations on a fixed prompt set (10 prompts × 3 seeds) → `docs/SAMPLES.md`.
+  - After both runs: `docs/EVAL.md` + `docs/SAMPLES.md`.
 
-**Exit criteria:** Phase 2 checkpoint under `checkpoints/phase2/best.pt`, val PPL ≤ 18, `EVAL.md` + `SAMPLES.md` published. Total T4 spend ≤ ~$55.
+**Exit criteria:** `checkpoints/minigpt-high/best.pt`, val PPL ≤ 18, EVAL + SAMPLES, total T4 spend within budget.
 
 ---
 
