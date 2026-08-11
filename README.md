@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** **Phase 1 (Data Pipeline) is complete.** Tokenized shards live on the Azure data disk (`/data/tokenized/`). Next: Phase 2 model architecture. The model is not trained yet.
+> **Note:** **Phase 1–2 complete.** Data shards on Azure `/data/tokenized/`; GPT model (RoPE + SwiGLU) in-repo. Next: Phase 3 training engine. The model is not trained yet.
 
 ```bash
 # Clone
@@ -25,6 +25,9 @@ pytest -q
 # export HF_TOKEN=...
 # python -m scripts.run_phase1_pipeline --data-root /data
 # python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
+
+# Model smoke (Phase 2+)
+# python -c "from minigpt_llm.model import GPT, load_config; print(GPT(load_config('configs/tiny.yaml')).num_parameters())"
 
 # Train (Phase 3+)
 # python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
@@ -67,13 +70,13 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 |---|---|---|---|
 | Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
-| Phase 2 — Model Architecture | 8 | 0 | ⏳ Pending (next) |
-| Phase 3 — Training Engine | 9 | 0 | ⏳ Pending |
+| Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
+| Phase 3 — Training Engine | 9 | 0 | ⏳ Pending (next) |
 | Phase 4 — Training Runs | 7 | 0 | ⏳ Pending |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **18** | |
+| **Total** | **62** | **26** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -121,6 +124,36 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 ```bash
 # on azure-train (when VM is started)
 python -m training.dataset --shard /data/tokenized/tinystories.bin --context 1024 --batch 4
+```
+
+### Phase 2 — Model Architecture (✅ Complete)
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 2.1 | Config + YAML | ✅ | `minigpt_llm.model.config`, `configs/{tiny,medium}.yaml` |
+| 2.2 | RoPE | ✅ | no learned PE |
+| 2.3 | Causal MHA | ✅ | train mask + SDPA eval; KV-cache |
+| 2.4 | SwiGLU MLP | ✅ | intermediate ≈ 8/3 H, ×64 |
+| 2.5 | Decoder block | ✅ | pre-norm RMSNorm |
+| 2.6 | Full GPT + generate | ✅ | tied LM head, top-k/top-p |
+| 2.7 | Weight init + dtype | ✅ | trunc-normal; **no BF16** |
+| 2.8 | Overfit single batch | ✅ | `tests/test_overfit.py` loss &lt; 2.0 |
+
+**Configs (measured params, vocab 32k, tied head):**
+
+| Config | Spec | Params |
+|---|---|---|
+| `configs/tiny.yaml` | 6L, 256-dim, 4 heads, ctx 512 | **13,012,224** |
+| `configs/medium.yaml` | 8L, 384-dim, 6 heads, ctx 1024 | **26,450,304** |
+
+```bash
+from minigpt_llm.model import GPT, load_config
+model = GPT(load_config("configs/medium.yaml"))
+print(model.num_parameters())  # 26450304
+```
+
+```bash
+pytest -q tests/model tests/test_overfit.py
 ```
 
 ### Local repo setup (Track B — ✅ Complete)
