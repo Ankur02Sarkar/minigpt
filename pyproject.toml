@@ -45,7 +45,13 @@ target-version = "py312"
 [tool.ruff.lint]
 # TCH omitted: Path/Callable used widely in signatures under postponed annotations;
 # TYPE_CHECKING blocks add noise without much value in this codebase.
+# N812: allow `import torch.nn.functional as F` (PyTorch convention).
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+ignore = ["N812"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest.importorskip("torch") before model imports on Macs without torch.
+"tests/**" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

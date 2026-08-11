@@ -148,39 +148,39 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 ---
 
-### Phase 2 — Model Architecture
-*Goal: a from-scratch GPT implementation in `model/` that matches `configs/*.yaml`, type-checked and unit-tested.*
+### Phase 2 — Model Architecture ✅ COMPLETE
+*Goal: a from-scratch GPT implementation in `minigpt_llm/model/` that matches `configs/*.yaml`, type-checked and unit-tested.*
 
-- **2.1 Config system (`model/config.py`)** `[ ]`
+- **2.1 Config system (`minigpt_llm/model/config.py`)** `[x]`
   - `@dataclass(frozen=True)` `ModelConfig` with `vocab_size`, `num_layers`, `hidden_size`, `num_heads`, `max_position_embeddings`, `dropout`, `rope_theta`, `tie_weights`.
-  - YAML loader: `load_config("configs/medium.yaml")` returns a typed `ModelConfig`.
-  - Param-count helper: `estimate_params(config) -> int` (verified vs. real instantiation to within 1%).
-- **2.2 Token + positional embeddings** `[ ]`
+  - YAML loader: `load_config("configs/medium.yaml")` returns a typed `ModelConfig` (nested `model:`).
+  - Param-count helper: `estimate_params(config) -> int` (exact match vs. real instantiation).
+- **2.2 Token + positional embeddings** `[x]`
   - `nn.Embedding(vocab_size, hidden_size)` for tokens.
-  - **RoPE** (rotary) — no learned positional embeddings. Easier length generalization.
-  - Unit test: RoPE on identity returns identity up to FP tolerance.
-- **2.3 Causal multi-head self-attention** `[ ]`
+  - **RoPE** (rotary) — no learned positional embeddings (`minigpt_llm/model/rope.py`).
+  - Unit tests: shape, norm preservation, offset slices.
+- **2.3 Causal multi-head self-attention** `[x]`
   - `q, k, v` projections, split into heads, apply RoPE, scaled dot-product, causal mask, out projection.
-  - Use `F.scaled_dot_product_attention` (PyTorch 2.x) when `is_training=False` for speed; explicit mask in train mode.
-  - Unit test: mask is lower-triangular; output shape `(B, T, hidden)`.
-- **2.4 SwiGLU MLP** `[ ]`
-  - `down(act(gate(x)) * up(x))` with hidden dim `≈ 8/3 * hidden_size`, rounded to multiple of 64.
-  - Unit test: parameter count matches the canonical LLaMA formula.
-- **2.5 Decoder block** `[ ]`
-  - Pre-norm, attention + residual, pre-norm, MLP + residual.
-  - Configurable dropout. Unit test: residual stream norm stays bounded.
-- **2.6 Full GPT model (`model/model.py`)** `[ ]`
+  - Explicit causal mask in train mode; SDPA `is_causal` in eval when no cache.
+  - Unit tests: shape `(B, T, hidden)`; causal property; KV-cache growth.
+- **2.4 SwiGLU MLP** `[x]`
+  - `down(silu(gate(x)) * up(x))` with hidden dim `≈ 8/3 * hidden_size`, multiple of 64.
+  - Unit test: parameter count `3 * H * I`.
+- **2.5 Decoder block** `[x]`
+  - Pre-norm RMSNorm, attention + residual, pre-norm, MLP + residual.
+  - Unit test: residual stream finite / bounded.
+- **2.6 Full GPT model (`minigpt_llm/model/model.py`)** `[x]`
   - Embed → N × DecoderBlock → final RMSNorm → tied LM head.
-  - `forward(input_ids, labels=None)` returns `CausalLMOutputWithPast(loss, logits)`.
-  - `generate(input_ids, max_new_tokens, temperature, top_k, top_p)` with KV-cache.
-- **2.7 Weight init + dtype policy** `[ ]`
-  - Truncated normal init (std 0.02) for linears, normal init for embeddings.
-  - **FP16 on T4** (`model.to(dtype=torch.float16)` for inference); FP32 master weights for training with `GradScaler`. **Never `torch.bfloat16`** — T4 (Turing) has no BF16 support.
-- **2.8 Sanity overfit on a single batch** `[ ]`
-  - Generate 1 batch of 1024 tokens, run 200 steps, assert loss < 2.0.
-  - Add as `tests/test_overfit.py` so it runs in CI on a CPU-only runner.
+  - `forward` → `CausalLMOutputWithPast(loss, logits, past_key_values)`.
+  - `generate(..., temperature, top_k, top_p)` with KV-cache.
+- **2.7 Weight init + dtype policy** `[x]`
+  - Truncated normal init (std 0.02) for linears, normal for embeddings (`init.py`).
+  - **Never `torch.bfloat16`** — `assert_not_bfloat16` helper; FP16 for T4 inference later.
+- **2.8 Sanity overfit on a single batch** `[x]`
+  - `tests/test_overfit.py`: 2L/64-dim mini model, 200 AdamW steps, loss &lt; 2.0 on CPU.
 
-**Exit criteria:** `pytest tests/model -q` green; overfit test passes; `configs/medium.yaml` instantiates a ~20M-param model.
+**Measured params (vocab 32k, tied head):** `tiny.yaml` **13,012,224**; `medium.yaml` **26,450,304** (AGENTS “~8M/~20M” undercounted the embedding table).  
+**Exit criteria:** `pytest tests/model tests/test_overfit.py` green (24 tests); estimate matches real; generate + overfit OK.
 
 ---
 
