@@ -2,6 +2,8 @@
 Description=minigpt sequential training (minigpt-low then minigpt-high)
 After=network-online.target
 Wants=network-online.target
+StartLimitBurst=10
+StartLimitIntervalSec=600
 
 [Service]
 Type=simple
@@ -16,8 +18,6 @@ ExecStartPre=/bin/bash -c 'df -P /data | awk "NR==2{exit !($5+0 < 95)}"'
 ExecStart=/bin/bash /opt/minigpt_llm/scripts/run_phase_queue.sh
 Restart=on-failure
 RestartSec=60
-StartLimitBurst=10
-StartLimitIntervalSec=600
 OOMScoreAdjust=-500
 StandardOutput=journal
 StandardError=journal

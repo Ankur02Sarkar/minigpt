@@ -20,10 +20,25 @@ pick_log() {
 LOG="$(pick_log)"
 STEP=0
 LOSS=null
-if [[ -n "$LOG" && -f "$LOG" ]]; then
-  STEP="$(grep -oE 'step[= ]+[0-9]+' "$LOG" 2>/dev/null | tail -1 | grep -oE '[0-9]+' || echo 0)"
-  LOSS="$(grep -oE 'loss[= ]+[0-9.]+' "$LOG" 2>/dev/null | tail -1 | grep -oE '[0-9.]+' || echo null)"
+# Prefer run.log; fall back to journal (structlog may only be on stdout early)
+extract() {
+  local src="$1"
+  if [[ -f "$src" ]]; then
+    STEP="$(grep -oE 'step[= ]+[0-9]+' "$src" 2>/dev/null | tail -1 | grep -oE '[0-9]+$' || true)"
+    LOSS="$(grep -oE 'loss[= ]+[0-9.eE+-]+' "$src" 2>/dev/null | tail -1 | grep -oE '[0-9.eE+-]+$' || true)"
+  fi
+}
+if [[ -n "$LOG" ]]; then
+  extract "$LOG"
 fi
+if [[ -z "${STEP:-}" || "$STEP" == "0" ]]; then
+  JTMP="$(mktemp)"
+  journalctl -u minigpt-train-queue -n 200 --no-pager 2>/dev/null >"$JTMP" || true
+  extract "$JTMP"
+  rm -f "$JTMP"
+fi
+STEP="${STEP:-0}"
+LOSS="${LOSS:-null}"
 
 GPU="n/a"
 if command -v nvidia-smi >/dev/null 2>&1; then
