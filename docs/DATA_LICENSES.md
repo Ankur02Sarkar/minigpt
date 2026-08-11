@@ -5,7 +5,7 @@ Every dataset used by minigpt-llm is logged here with version, license, and the 
 | Dataset | HF ID / config | License | How we use it | Loader |
 |---|---|---|---|---|
 | TinyStories | `roneneldan/TinyStories` (train) | CDLA-Sharing-1.0 (see dataset card) | Full download → clean → BPE → `tinystories.bin` | `minigpt_llm.data.download.download_tinystories` |
-| WikiText-103 | `wikitext` / `wikitext-103-v1` (train) | CC BY-SA 3.0 | Full download → clean → BPE → `wikitext.bin` + 5% `val.bin` | `minigpt_llm.data.download.download_wikitext` |
+| WikiText-103 | `Salesforce/wikitext` / `wikitext-103-v1` (train) | CC BY-SA 3.0 | Full download → clean → BPE → `wikitext.bin` + 5% `val.bin` | `minigpt_llm.data.download.download_wikitext` |
 | FineWeb-Edu | `HuggingFaceFW/fineweb-edu` / `sample-10BT` | ODC-By 1.0 | **Stream only**, no raw mirror; filter + tokenize in-flight; **hard cap 500M tokens** → `fineweb.bin` | `minigpt_llm.data.fineweb.stream_and_tokenize_fineweb` |
 
 ## Policy

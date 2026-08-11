@@ -128,8 +128,9 @@ def download_wikitext(
     """1.2 — Download WikiText-103 train split → ``/data/raw/wikitext103.txt``."""
     paths.ensure_dirs()
     log.info("download_wikitext_start", out=str(paths.wikitext_raw))
+    # Prefer namespaced id: huggingface_hub>=1.x rejects bare "wikitext" (no namespace).
     docs = _iter_dataset_text(
-        "wikitext",
+        "Salesforce/wikitext",
         config="wikitext-103-v1",
         split="train",
         text_field="text",
