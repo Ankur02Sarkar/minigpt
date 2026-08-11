@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** **Phase 1–2 complete.** Data shards on Azure `/data/tokenized/`; GPT model (RoPE + SwiGLU) in-repo. Next: Phase 3 training engine. The model is not trained yet.
+> **Note:** **Phase 1–3 complete.** Data on Azure `/data/tokenized/`; GPT model + training engine in-repo. Next: Phase 4 production training runs on T4. Long runs not started yet.
 
 ```bash
 # Clone
@@ -29,8 +29,12 @@ pytest -q
 # Model smoke (Phase 2+)
 # python -c "from minigpt_llm.model import GPT, load_config; print(GPT(load_config('configs/tiny.yaml')).num_parameters())"
 
-# Train (Phase 3+)
-# python -m training.train --config configs/tiny.yaml --data-dir /data/tokenized
+# Train (Phase 3+) — on azure-train with /data mounted
+# python -m training.train \
+#   --config configs/tiny.yaml \
+#   --data-dir /data/tokenized \
+#   --out-dir /opt/minigpt_llm/checkpoints/smoke \
+#   --max-steps 1000 --device cuda
 
 # Serve (Phase 6+)
 # uvicorn serving.server:app --host 0.0.0.0 --port 8080
@@ -71,12 +75,12 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 0 — Foundation & Infra | 8 | 8 | ✅ Done |
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
-| Phase 3 — Training Engine | 9 | 0 | ⏳ Pending (next) |
-| Phase 4 — Training Runs | 7 | 0 | ⏳ Pending |
+| Phase 3 — Training Engine | 9 | 9 | ✅ Done |
+| Phase 4 — Training Runs | 7 | 0 | ⏳ Pending (next) |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **26** | |
+| **Total** | **62** | **35** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -155,6 +159,33 @@ print(model.num_parameters())  # 26450304
 ```bash
 pytest -q tests/model tests/test_overfit.py
 ```
+
+### Phase 3 — Training Engine (✅ Complete)
+
+| # | Task | Status | Notes |
+|---|---|---|---|
+| 3.1 | Memmap multi-shard dataset | ✅ | `MultiShardDataset`, worker seed |
+| 3.2 | AdamW optimizer | ✅ | decay / no-decay groups |
+| 3.3 | Warmup + cosine LR | ✅ | pure PyTorch |
+| 3.4 | Atomic checkpoints | ✅ | latest / best / last 3 steps |
+| 3.5 | Val eval | ✅ | loss + perplexity |
+| 3.6 | Logging | ✅ | structlog + TensorBoard |
+| 3.7 | Grad accum + FP16 AMP | ✅ | CUDA only; FP32 on CPU; no BF16 |
+| 3.8 | CLI | ✅ | `python -m training.train` |
+| 3.9 | Smoke | ✅ | `tests/test_train_smoke.py` |
+
+```bash
+# on azure-train (start VM first; deallocate when done)
+python -m training.train \
+  --config configs/tiny.yaml \
+  --data-dir /data/tokenized \
+  --out-dir /opt/minigpt_llm/checkpoints/smoke \
+  --max-steps 1000 \
+  --device cuda \
+  --resume latest
+```
+
+Defaults (T4): `per_device_batch=4`, `grad_accum=16` → effective batch 64, FP16 autocast.
 
 ### Local repo setup (Track B — ✅ Complete)
 
