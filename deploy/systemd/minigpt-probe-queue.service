@@ -1,0 +1,29 @@
+[Unit]
+Description=minigpt Phase 4.8/4.4 probe queue (Step B diagnosis + 3 probes)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=10
+StartLimitIntervalSec=600
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/minigpt_llm
+Environment=MINIGPT_ROOT=/opt/minigpt_llm
+Environment=MINIGPT_DATA_DIR=/data/tokenized
+# Refuse to start if /data is nearly full
+ExecStartPre=/bin/bash -c 'df -P /data | awk "NR==2{exit !($5+0 < 95)}"'
+ExecStart=/bin/bash /opt/minigpt_llm/scripts/run_probe_queue.sh
+ExecStopPost=/bin/bash -c 'curl -s -d "minigpt: probe queue done" https://ntfy.sh/minigpt-phase4 >/dev/null 2>&1 || true'
+Restart=on-failure
+RestartSec=60
+StartLimitBurst=10
+OOMScoreAdjust=-500
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minigpt-probe-queue
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
