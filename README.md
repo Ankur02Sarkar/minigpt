@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** **Phase 1–3 complete; Phase 4 training runs in progress on Azure T4** under systemd (`minigpt-low` → `minigpt-high`). You can close the laptop — training continues with `--resume latest`.
+> **Note:** **Phase 1–4 complete.** Both training runs finished (`minigpt-low` → `minigpt-high`) and the Azure T4 is **deallocated** to save credits. See [`docs/EVAL.md`](docs/EVAL.md) for results and [`docs/SAMPLES.md`](docs/SAMPLES.md) for generations. Next: Phase 5 (inference).
 
 ```bash
 # Clone
@@ -76,11 +76,11 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
 | Phase 3 — Training Engine | 9 | 9 | ✅ Done |
-| Phase 4 — Training Runs | 7 | 2 | 🔄 In progress (systemd queue) |
+| Phase 4 — Training Runs | 7 | 5 | ✅ Trained (PPL targets missed — see EVAL.md) |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **37** | |
+| **Total** | **62** | **40** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -183,20 +183,25 @@ cat /opt/minigpt_llm/STATUS.json
 
 Models: **minigpt-low** (50k steps, TinyStories) then **minigpt-high** (100k steps, full corpus).  
 Defaults (T4): `per_device_batch=4`, `grad_accum=16` → effective batch 64, FP16 autocast.  
-**Do not deallocate T4 until both `best.pt` exist.**
+Both `best.pt` checkpoints exist — the T4 has been **deallocated**.
 
-### Phase 4 — Training Runs (🔄 In progress)
+### Phase 4 — Training Runs (✅ Trained — PPL targets missed)
 
-| Model | Config | Steps | Target val PPL | Checkpoint dir |
-|---|---|---|---|---|
-| **minigpt-low** | `minigpt-low.yaml` | 50k | ≤ 25 | `checkpoints/minigpt-low/` |
-| **minigpt-high** | `minigpt-high.yaml` | 100k | ≤ 18 | `checkpoints/minigpt-high/` |
+| Model | Config | Steps | Target val PPL | Actual val PPL | Wall time | best.pt |
+|---|---|---|---|---|---|---|
+| **minigpt-low** | `minigpt-low.yaml` | 50k | ≤ 25 (invalid*) | ~14,745 | 9.4 h | 149 MB |
+| **minigpt-high** | `minigpt-high.yaml` | 100k | ≤ 18 | ~111 | 78.6 h | 303 MB |
+
+\* minigpt-low trained on TinyStories but was evaluated on the WikiText val shard — a cross-domain target it could never hit. Full breakdown, val-loss curves, cost record, and next steps (task 4.8 diagnosis) in [`docs/EVAL.md`](docs/EVAL.md); verbatim generations in [`docs/SAMPLES.md`](docs/SAMPLES.md).
+
+Both runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
 
 Ops: [`docs/PHASE4_RUNBOOK.md`](docs/PHASE4_RUNBOOK.md) · systemd unit `minigpt-train-queue` · heartbeat `STATUS.json`.
 
-After 30–40h, verify from Mac:
 ```bash
-ssh azure-train 'cat /opt/minigpt_llm/STATUS.json; ls checkpoints/minigpt-*/best.pt'
+# resume work on the models (billing resumes)
+az vm start -g minigpt-rg -n minigpt-train
+ssh azure-train 'cat /opt/minigpt_llm/STATUS.json; ls /opt/minigpt_llm/checkpoints/minigpt-*/best.pt'
 ```
 
 ### Local repo setup (Track B — ✅ Complete)

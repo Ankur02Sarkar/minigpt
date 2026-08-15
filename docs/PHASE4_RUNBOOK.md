@@ -76,3 +76,24 @@ Queue skips a model if `checkpoints/<name>/.phase_complete` exists.
 | Logs | `/opt/minigpt_llm/logs/minigpt-low|high/run.log` |
 | Heartbeat | `/opt/minigpt_llm/STATUS.json` |
 | Data | `/data/tokenized/` (never on `/mnt`) |
+
+## Completed — 2026-08-15 (record)
+
+Both runs finished exit 0 under `minigpt-train-queue`:
+
+| Model | Window (UTC) | Steps | best_val_loss | val PPL | best.pt |
+|---|---|---|---|---|---|
+| minigpt-low | 08-11 10:14 → 08-11 19:38 | 50k | 9.5987 (step 1k) | ~14,745 | 149 MB |
+| minigpt-high | 08-11 19:38 → 08-15 02:16 | 100k | 4.7136 (step 100k) | ~111.4 | 303 MB |
+
+**PPL targets (≤ 25 / ≤ 18) were missed** — full analysis in [`EVAL.md`](EVAL.md),
+samples in [`SAMPLES.md`](SAMPLES.md), diagnosis tracked as AGENTS.md task 4.8.
+
+Samples were generated on the VM (`scripts/generate_samples.py`), then:
+
+```bash
+az vm deallocate -g minigpt-rg -n minigpt-train   # done 2026-08-15 ~13:37 UTC → "VM deallocated"
+```
+
+Checkpoints persist on the OS disk; `/data` disk intact. To resume work on the models:
+`az vm start -g minigpt-rg -n minigpt-train` (billing resumes).

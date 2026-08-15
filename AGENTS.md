@@ -213,33 +213,40 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 4 — Training Runs (progressive scaling) `[~]`
 *Goal: two production-quality models, fully logged, ready to serve. **minigpt-high** is the final deliverable — no 50M third model.*
 
+> **Status 2026-08-15:** both runs completed exit 0 and both `best.pt` exist, but **val-PPL targets were missed** (low: ~14.7k on an invalid cross-domain eval; high: ~111 vs ≤ 18). Full analysis in `docs/EVAL.md`, samples in `docs/SAMPLES.md`. T4 **deallocated 2026-08-15 ~13:37 UTC**. Diagnosis = task 4.8 below (budget-gated).
+
 **Naming:** small model = **minigpt-low** · large model = **minigpt-high**.  
 **Long runs:** systemd `minigpt-train-queue` + `--resume latest` (not bare SSH). See `docs/PHASE4_RUNBOOK.md`.
 
 - **4.1 Phase-runner script (`scripts/run_phase.sh`)** `[x]`
   - Wraps `train.py` per model name; writes `logs/<name>/RUN.md`.
   - Queue: `scripts/run_phase_queue.sh` (low then high).
-- **4.2 minigpt-low on TinyStories (T4, ~4 h)** `[~]`
+- **4.2 minigpt-low on TinyStories (T4, ~4 h)** `[x]`
   - Config: `configs/minigpt-low.yaml` (6L, 256-dim, 4 heads, ctx 512, ~13M).
   - 50k steps, eval every 1k, target val PPL ≤ 25.
   - Checkpoints: `/opt/minigpt_llm/checkpoints/minigpt-low/`.
-- **4.3 minigpt-high on TinyStories + WikiText + FineWeb (T4, ~20 h) — FINAL** `[~]`
+  - **Actual:** 50k steps exit 0 in 9.4 h (2026-08-11); best_val_loss 9.599 @ step 1k (PPL ~14.7k). Target invalid — trained TinyStories, evaluated on WikiText val (see `docs/EVAL.md`).
+- **4.3 minigpt-high on TinyStories + WikiText + FineWeb (T4, ~20 h) — FINAL** `[x]`
   - Config: `configs/minigpt-high.yaml` (8L, 384-dim, 6 heads, ctx 1024, ~26M).
   - 100k steps, eval every 2k, target val PPL ≤ 18.
   - Checkpoints: `/opt/minigpt_llm/checkpoints/minigpt-high/`.
+  - **Actual:** 100k steps exit 0 in 78.6 h (2026-08-11 → 08-15); best_val_loss 4.714 @ step 100k (PPL ~111 vs ≤ 18 target — missed; underfitting, not overfitting; see `docs/EVAL.md`).
 - **4.4 Hyperparam tuning pass (budget-aware, short)** `[ ]`
   - Optional if credits allow; &lt; 4 T4-hours; short 5k-step probes.
   - Promote best into `configs/minigpt-high.yaml`.
 - **4.5 ~~50M model~~ — REMOVED** `[!]`
   - Not in scope.
-- **4.6 Long-run monitoring** `[x]` code / `[~]` live
-  - **systemd** `minigpt-train-queue.service` (not tmux-only).
+- **4.6 Long-run monitoring** `[x]`
+  - **systemd** `minigpt-train-queue.service` (not tmux-only) — queue ran both models unattended, exited 0 with `phase: both_complete`.
   - Heartbeat cron → `/opt/minigpt_llm/STATUS.json`.
-  - `--resume latest`; deallocate T4 only after both complete.
-- **4.7 Final eval report** `[ ]`
-  - After both runs: `docs/EVAL.md` + `docs/SAMPLES.md`.
+  - `--resume latest`; T4 deallocated only after both completed (2026-08-15 ~13:37 UTC).
+- **4.7 Final eval report** `[x]`
+  - `docs/EVAL.md` + `docs/SAMPLES.md` written from real run logs + generations; anomaly record in `logs/RUN_NOTES.md`.
+- **4.8 PPL diagnosis + tuning probe (NEW — budget-gated)** `[ ]`
+  - Both runs missed PPL targets (see `docs/EVAL.md`). Before any retrain spend: (a) sanity-check `training/evaluate.py` vs manual loss pass; (b) audit `MultiShardDataset` shard order/shuffle; (c) audit BPE merges/token fertility; (d) add TinyStories val split so low-model targets are in-domain.
+  - Only after a cause is found: short 5k-step probes on T4 (< 4 T4-hours), fold into 4.4.
 
-**Exit criteria:** `checkpoints/minigpt-high/best.pt`, val PPL ≤ 18, EVAL + SAMPLES, total T4 spend within budget.
+**Exit criteria:** `checkpoints/minigpt-high/best.pt` ✅, val PPL ≤ 18 ❌ (actual ~111 — see 4.8), EVAL + SAMPLES ✅, total T4 spend within budget ❌ (~100 T4-hours ≈ $75 vs ~24 h planned; within the $200 credit). Phase stays `[~]` until 4.8 resolves the PPL gap or is explicitly waived.
 
 ---
 
