@@ -41,9 +41,9 @@ def test_invalid_heads() -> None:
         )
 
 
-def test_load_tiny_yaml() -> None:
+def test_load_minigpt_low_yaml() -> None:
     root = Path(__file__).resolve().parents[2]
-    cfg = load_config(root / "configs" / "tiny.yaml")
+    cfg = load_config(root / "configs" / "minigpt-low.yaml")
     assert cfg.vocab_size == 32000
     assert cfg.num_layers == 6
     assert cfg.hidden_size == 256
@@ -52,30 +52,29 @@ def test_load_tiny_yaml() -> None:
     assert cfg.tie_weights is True
 
 
-def test_load_medium_yaml() -> None:
+def test_load_minigpt_high_yaml() -> None:
     root = Path(__file__).resolve().parents[2]
-    cfg = load_config(root / "configs" / "medium.yaml")
+    cfg = load_config(root / "configs" / "minigpt-high.yaml")
     assert cfg.num_layers == 8
     assert cfg.hidden_size == 384
     assert cfg.num_heads == 6
     assert cfg.max_position_embeddings == 1024
 
 
-def test_estimate_params_within_1_percent_tiny() -> None:
+def test_estimate_params_within_1_percent_low() -> None:
     root = Path(__file__).resolve().parents[2]
-    cfg = load_config(root / "configs" / "tiny.yaml")
+    cfg = load_config(root / "configs" / "minigpt-low.yaml")
     est = estimate_params(cfg)
     model = GPT(cfg)
     real = model.num_parameters()
     rel = abs(real - est) / max(real, 1)
     assert rel < 0.01, f"estimate {est} vs real {real} rel={rel}"
-    # ~8M ballpark (allow 5–15M depending on formula)
     assert 4_000_000 < real < 15_000_000
 
 
-def test_estimate_params_medium_about_20m() -> None:
+def test_estimate_params_high_about_26m() -> None:
     root = Path(__file__).resolve().parents[2]
-    cfg = load_config(root / "configs" / "medium.yaml")
+    cfg = load_config(root / "configs" / "minigpt-high.yaml")
     model = GPT(cfg)
     real = model.num_parameters()
     est = estimate_params(cfg)

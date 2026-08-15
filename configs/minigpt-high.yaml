@@ -1,4 +1,7 @@
-# ~26M param FINAL shipped model (Phase 4.3)
+# minigpt-high — larger FINAL model (~26M params)
+# Train: TinyStories + WikiText + FineWeb (500M), ~100k steps, target val PPL ≤ 18
+name: minigpt-high
+
 model:
   vocab_size: 32000
   num_layers: 8
