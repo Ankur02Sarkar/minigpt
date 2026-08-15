@@ -19,7 +19,7 @@ log = structlog.get_logger(__name__)
 def load_model(checkpoint: Path, device: torch.device) -> tuple[GPT, int]:
     """Load a GPT model + trained step from a training checkpoint."""
     payload = torch.load(checkpoint, map_location=device, weights_only=False)
-    config = ModelConfig(**payload["config"])
+    config = ModelConfig(**payload["config"]["model"])
     model = GPT(config).to(device)
     model.load_state_dict(payload["model"])
     model.eval()
