@@ -17,6 +17,7 @@ __all__ = [
     "append_token_ids",
     "load_meta",
     "save_meta",
+    "split_tinystories_val",
     "split_wikitext_val",
     "tokenize_text_file",
     "write_token_ids",
@@ -181,6 +182,51 @@ def split_wikitext_val(
 
     stats = {"train_tokens": n_train, "val_tokens": n_val, "total_before": n}
     log.info("wikitext_val_split", **stats)
+    return stats
+
+
+def split_tinystories_val(
+    paths: DataPaths,
+    *,
+    train_frac: float = 0.95,
+    force: bool = False,
+) -> dict[str, int]:
+    """Phase 4.8 — Split tokenized TinyStories 95/5 into ``tinystories.bin`` (train prefix,
+    rewritten in place) + a held-out ``tinystories_val.bin`` so an in-domain minigpt-low
+    val target is achievable (the prior setup eval'd a TinyStories model on WikiText).
+
+    Reads the existing ``tinystories.bin`` (full), rewrites train prefix and val suffix.
+    """
+    src = paths.tinystories_bin
+    if not src.is_file():
+        raise FileNotFoundError(f"tinystories shard missing: {src}")
+    if train_frac <= 0.0 or train_frac >= 1.0:
+        raise ValueError(f"train_frac must be in (0,1), got {train_frac}")
+
+    data = np.memmap(src, dtype=_DTYPE, mode="r")
+    n = int(data.shape[0])
+    if n < 2:
+        raise RuntimeError(f"tinystories shard too small to split: {n} tokens")
+    n_train = max(1, int(n * train_frac))
+    n_val = n - n_train
+    if n_val < 1:
+        n_train = n - 1
+        n_val = 1
+
+    train_ids = np.array(data[:n_train], dtype=_DTYPE)
+    val_ids = np.array(data[n_train:], dtype=_DTYPE)
+    del data  # release memmap before rewrite
+
+    write_token_ids(paths.tinystories_bin, train_ids, force=True)
+    write_token_ids(paths.tinystories_val_bin, val_ids, force=force or True)
+
+    meta = load_meta(paths.meta_pkl)
+    meta["tinystories"] = {"tokens": n_train, "dtype": "int32"}
+    meta["tinystories_val"] = {"tokens": n_val, "dtype": "int32"}
+    save_meta(paths.meta_pkl, meta)
+
+    stats = {"train_tokens": n_train, "val_tokens": n_val, "total_before": n}
+    log.info("tinystories_val_split", **stats)
     return stats
 
 

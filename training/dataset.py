@@ -125,28 +125,62 @@ class MultiShardDataset(Dataset[dict[str, torch.Tensor]]):
             if num_samples < 1:
                 raise ValueError("num_samples must be >= 1")
             self._num_samples = num_samples
+        # Token-weighted shard selection (not uniform 1/N): draw each window from a
+        # shard with probability proportional to its token count, so the empirical
+        # mix matches the configured shard sizes instead of over-sampling small
+        # shards (e.g. WikiText was 33% of samples under uniform, not its 10%).
+        weights = np.array([s.n_tokens for s in self.shards], dtype=np.float64)
+        self._shard_probs = weights / weights.sum()
+        self._cumulative = np.cumsum(self._shard_probs)
+        self._cumulative[-1] = 1.0  # guard against float drift
         self._rng = np.random.default_rng(seed)
         log.info(
             "multi_shard_opened",
             n_shards=len(self.shards),
             total_tokens=total_tokens,
             num_samples=self._num_samples,
+            shard_probs=self._shard_probs.tolist(),
         )
 
     def __len__(self) -> int:
         return self._num_samples
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        shard_idx = int(self._rng.integers(0, len(self.shards)))
-        # re-seed per index for variety while staying deterministic given seed stream
+        # Token-weighted shard pick via inverse-CDF searchsorted.
+        r = float(self._rng.random())
+        shard_idx = int(np.searchsorted(self._cumulative, r, side="right"))
+        if shard_idx >= len(self.shards):
+            shard_idx = len(self.shards) - 1
         return self.shards[shard_idx][index]
 
 
+def _reseed_worker_dataset(ds: Dataset[dict[str, torch.Tensor]], base_seed: int) -> None:
+    """Re-seed dataset-internal numpy Generators so workers draw distinct windows.
+
+    PyTorch forks the dataset into each worker but copies RNG state verbatim, so
+    multiple workers otherwise draw *overlapping* windows (≈ half unique-data
+    diversity over many epochs). ``worker_info.seed`` already differs per worker
+    (base_seed + worker_id), so reseeding from it breaks the collision.
+    """
+    if isinstance(ds, MultiShardDataset):
+        ds._rng = np.random.default_rng(base_seed)
+        for j, sh in enumerate(ds.shards):
+            sh._rng = np.random.default_rng(base_seed + (j + 1) * 1009)
+    elif isinstance(ds, TokenShardDataset):
+        ds._rng = np.random.default_rng(base_seed)
+
+
 def worker_init_fn(worker_id: int) -> None:
-    """Seed numpy / torch per DataLoader worker."""
+    """Seed numpy / torch per DataLoader worker and re-seed dataset RNGs."""
+    worker_info = torch.utils.data.get_worker_info()
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed + worker_id)
     torch.manual_seed(worker_seed + worker_id)
+    if worker_info is not None:
+        _reseed_worker_dataset(
+            worker_info.dataset,
+            int(worker_info.seed) % 2**32,
+        )
 
 
 def build_dataloader(
