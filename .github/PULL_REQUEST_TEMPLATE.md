@@ -1,20 +1,34 @@
-## Summary
+---
+description: Pull Request Template for minigpt_llm
+---
+## 📥 Pull Request Template
 
-<!-- Brief description of the change -->
+### Summary
+**What does this PR do?** _(be specific — link to issue if applicable)_\
+**Which phase does this affect?** _(e.g., Phase 7, Phase 5.3)_\
+**Breaking changes?** _(yes/no + description if yes)_\
 
-## Phase / Task
+### Checklist (per AGENTS.md §5)
+- [ ] Code merged to `main` via PR with green CI
+- [ ] Tests covering new behavior added/updated
+- [ ] `README.md` updated if §0.1 trigger conditions apply
+- [ ] `AGENTS.md` phase markers flipped as appropriate
+- [ ] `ARCHITECTURE.md` updated if architecture changed
+- [ ] `logs/<run>/` artifacts committed or linked
 
-<!-- e.g. Phase 0 / Task 0.1 — link to AGENTS.md section -->
+### Type of Change
+- [ ] Bug fix (non-breaking correction)
+- [ ] New feature (non-breaking addition)
+- [ ] Breaking change / deprecation
+- [ ] Documentation update
+- [ ] CI / tooling / infrastructure
 
-## Changes
+### Testing
+- [ ] `uv run ruff format` passes
+- [ ] `uv run ruff check --fix` passes
+- [ ] `uv run mypy --strict model/ training/ serving/` passes
+- [ ] New/updated tests pass: `uv run pytest -x`
+- [ ] Manual verification (describe what you tested)
 
--
-
-## Checklist
-
-- [ ] Code follows repo conventions (ruff, mypy, type hints)
-- [ ] Tests added / updated
-- [ ] `README.md` updated (if applicable per §0.1)
-- [ ] `AGENTS.md` status markers flipped (if phase complete)
-- [ ] No secrets committed
-- [ ] CI green
+### Screenshots / Logs
+_(attach if applicable — e.g., STATUS.json, loss curves, error outputs)_

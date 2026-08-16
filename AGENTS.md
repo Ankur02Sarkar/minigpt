@@ -306,10 +306,10 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 - **6.5 Auth + rate limiting** `[x]`
   - Optional `Authorization: Bearer <key>` checked against `.env`-defined keys.
   - Per-IP token bucket; default 60 req/min, configurable.
-- **6.6 Streaming correctness tests** `[ ]`
+- **6.6 Streaming correctness tests** `[~]`
   - SSE frames parse as expected; NDJSON frames are line-delimited.
   - `stop` reason is one of `stop|length|content_filter`.
-- **6.7 Cross-client compatibility** `[ ]`
+- **6.7 Cross-client compatibility** `[~]`
   - Verify with `openai-python` SDK against `/v1/chat/completions`.
   - Verify with the official Ollama CLI against `/api/chat` and `/api/generate`.
   - Pin client versions in `tests/integration/requirements.txt`.
@@ -318,8 +318,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 ---
 
-### Phase 7 — Packaging, Distribution & OSS Polish
-*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
+| Phase 7 — Packaging & OSS Polish | 10 | 3 | 🟡 Dockerfile + compose + MODEL_CARD.md done; CONTRIBUTING.md + LICENSE + CHANGELOG.md + SECURITY.md + examples + OSS hygiene in progress; README final pass pending |*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
 
 - **7.1 Production Dockerfile (`docker/Dockerfile`)** `[ ]`
   - Multi-stage: build (with dev deps, compile wheels) → runtime (slim base).

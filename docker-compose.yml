@@ -1,0 +1,69 @@
+# Phase 7 — docker-compose for local development
+services:
+  train:
+    build:
+      context: .
+      target: builder
+      args:
+        - DATA_ROOT=/data
+    container_name: minigpt-train
+    restart: unless-stopped
+    environment:
+      - DATA_ROOT=/data
+      - MINIGPT_API_KEY=${MINIGPT_API_KEY}
+      - HF_HOME=/data/hf_cache
+    volumes:
+      - ./data:/data:cached
+      - ./checkpoints:/opt/minigpt_llm/checkpoints:cached
+      - ./logs:/opt/minigpt_llm/logs:cached
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  serve:
+    build:
+      context: .
+      target: runtime
+    container_name: minigpt-serve
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - MINIGPT_MODEL_PATH=/opt/minigpt_llm/checkpoints/minigpt-high/best.pt
+      - MINIGPT_TOKENIZER_DIR=/opt/minigpt_llm/tokenizer
+      - MINIGPT_API_KEY=${MINIGPT_API_KEY}
+      - MINIGPT_API_MODE=both
+    depends_on:
+      - train
+    volumes:
+      - ./checkpoints:/opt/minigpt_llm/checkpoints:ro
+      - ./tokenizer:/opt/minigpt_llm/tokenizer:ro
+
+  tb:
+    image: tiangolo/uvicorn-gunicorn-fastapi:python3.12
+    container_name: minigpt-tb
+    restart: unless-stopped
+    ports:
+      - "6006:6006"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs:ro
+    command: ["tb", "--logdir", "/app/logs", "--host", "0.0.0.0", "--port", "6006"]
+
+  # Optional: data prep on CPU
+  prep:
+    build:
+      context: .
+      target: builder
+    container_name: minigpt-prep
+    restart: unless-stopped
+    environment:
+      - DATA_ROOT=/data
+    volumes:
+      - ./data:/data:cached
+    command: ["/bin/bash", "-c", "echo 'Prep container ready'"]

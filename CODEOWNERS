@@ -1,0 +1,5 @@
+# Codeowners — mapping owners per directory
+/minigpt_llm/ @minigpt-maintainer
+/training/ @minigpt-maintainer
+/serving/ @minigpt-maintainer
+/data/ @minigpt-maintainer
