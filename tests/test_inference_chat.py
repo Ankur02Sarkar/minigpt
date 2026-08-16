@@ -43,23 +43,27 @@ def test_build_context_with_history(tiny_setup) -> None:
 def test_build_context_truncates_from_left(tiny_setup) -> None:
     """When the full context exceeds max_position_embeddings, oldest turns drop first."""
     model, tok, _ = tiny_setup
-    # Tiny tokenizer encodes ~1 token per char; tiny model ctx=64. Use a tiny
-    # max_position_embeddings so truncation triggers immediately.
-    s = ChatSession(model=model, tokenizer=tok, system="s", max_position_embeddings=10)
+    # The bare "System: s\nAssistant:" markers tokenize to ~20 tokens on this
+    # tiny BPE (System/Assistant are out-of-vocab -> byte-split), so the budget
+    # must comfortably exceed that to fit the framing. Body lines are then sized
+    # to overshoot the budget alone -> the truncation loop must drop ALL of
+    # them and leave only the markers.
+    budget = 40
+    s = ChatSession(model=model, tokenizer=tok, system="s", max_position_embeddings=budget)
     s.history = [
-        ("user", "aaaaaaaaaaaa"),
-        ("assistant", "bbbbbbbbbbbb"),
-        ("user", "cccccccccccc"),
-        ("assistant", "dddddddddddd"),
+        ("user", "z" * 100),
+        ("assistant", "y" * 100),
+        ("user", "w" * 100),
+        ("assistant", "v" * 100),
     ]
     ctx = s.build_context()
-    # However many turns were dropped, the earliest user turn should be gone.
-    assert "aaaaaaaaaaaa" not in ctx or "aaaaaaaaaaaa" not in s.history
+    # Truncation occurred: the earliest user turn was dropped.
+    assert ("z" * 100) not in ctx and ("z" * 100) not in s.history[0][1] if s.history else True
     # System prompt always preserved, trailing cue always present.
     assert ctx.startswith("System:")
     assert ctx.endswith("Assistant:")
-    # The final context must be within budget.
-    assert len(tok.encode(ctx).ids) <= 10
+    # The final context fits within budget (history fully dropped if needed).
+    assert len(tok.encode(ctx).ids) <= budget
 
 
 # --------------------------------------------------------------------------- #
