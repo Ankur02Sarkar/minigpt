@@ -251,13 +251,13 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
     (d) no TinyStories val split → added `split_tinystories_val` + `DataPaths.tinystories_val_bin` (enables in-domain low-model target).
   - 3 × 5k-step probes ran 2026-08-15/16 under systemd `minigpt-probe-queue.service` (probe-1-sampler, probe-2-hparam, probe-3-mix), all exit 0 with `best.pt` + `diagnose.json`. Probe-2 won (PPL 207.2 @5k). Results in `docs/EVAL.md`.
   - Code fixes + probe configs + diagnose script + systemd unit in `configs/probe-*.yaml`, `scripts/diagnose_phase4.py`, `scripts/run_probe_queue.sh`, `deploy/systemd/minigpt-probe-queue.service`.
-- **4.9 Full 100k retrain with promoted hparams (NEW — budget-gated)** `[ ]`
-  - Retrain **minigpt-high** with promoted probe-2 config: dropout 0.0, lr 1e-3, wd 0.05, warmup 10000 (~20h T4 ≈ $15).
+- **4.9 Full 100k retrain with promoted hparams (NEW — budget-gated)** `[~] deferred (budget)`
+  - Retrain **minigpt-high** with promoted probe-2 config: dropout 0.0, lr 1e-3, wd 0.05, warmup 10000 (~80h T4 ≈ **$60** — corrected from spec's $15; measured throughput ~23k tok/s, same as original 78.6h run).
   - Target: beat original val PPL 111.4 (extrapolating probe-2 trajectory → likely 60-80 range).
-  - Budget check: ~$90 spent of $200 credit; ~$110 remaining; retrain ($15) + Phase 5-7 fit within buffer.
-  - Run via systemd `minigpt-train.service` (see `docs/PHASE4_RUNBOOK.md`); `--resume latest`; deallocate T4 when done.
+  - **Deferred 2026-08-16 (budget):** full 100k retrain costs ~$60 (4× the spec's $15 estimate — the estimate wrongly assumed 2× throughput). Probe-2 results recorded as evidence in `docs/EVAL.md`; retrain is fully reproducible in a future free-trial account from the preserved data shards (~4 GB download to Mac, per §8.4) + this config on `main`. Phase 5 proceeds against the existing `checkpoints/minigpt-high/best.pt` (111 PPL) — the inference path is correct; only generation quality is capped by the checkpoint (improvable by 4.9 later).
+  - When resumed: run via systemd `minigpt-train.service` (see `docs/PHASE4_RUNBOOK.md`); back up existing `checkpoints/minigpt-high/` → `checkpoints/minigpt-high-original/`, clear `.phase_complete`, `--resume latest` into the clean dir; deallocate T4 when done.
 
-**Exit criteria:** `checkpoints/minigpt-high/best.pt` ✅, val PPL ≤ 18 ❌ (probe-2 extrapolates to ~60-80 after full 100k; awaiting 4.9 retrain), EVAL + SAMPLES ✅, total T4 spend ~$90 of $200 credit (within budget). Phase stays `[~]` until 4.9 retrain completes or is explicitly waived.
+**Exit criteria:** `checkpoints/minigpt-high/best.pt` ✅, val PPL ≤ 18 ❌ (4.9 retrain **deferred on budget** — probe-2 extrapolates to ~60-80; reproducible later from preserved shards), EVAL + SAMPLES ✅, total T4 spend ~$90 of $200 credit (within budget). Phase stays `[~]` until 4.9 is resumed or the project accepts 111 PPL as final.
 
 ---
 

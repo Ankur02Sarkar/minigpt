@@ -155,5 +155,5 @@ Next: task 4.9 — full 100k-step retrain with promoted hparams on T4 (~20h, ~$1
 
 ## Next steps
 
-1. **Task 4.9** (new): full 100k-step retrain of minigpt-high with promoted probe-2 hparams (dropout 0.0, lr 1e-3, wd 0.05, warmup 10000) on T4; ~20h ≈ $15; target beat val PPL 111.4.
+1. **Task 4.9** (new, **deferred 2026-08-16 on budget**): full 100k-step retrain of minigpt-high with promoted probe-2 hparams (dropout 0.0, lr 1e-3, wd 0.05, warmup 10000) on T4; **corrected cost ~80h ≈ $60** (measured throughput ~23k tok/s, same as the original 78.6h run — the spec's "$15 / ~20h" wrongly assumed 2× throughput). Target beat val PPL 111.4. Fully reproducible in a future free-trial account from the preserved data shards (~4 GB, see AGENTS.md §8.4) + this config on `main`.
 2. Phase 5 (inference) can proceed against `checkpoints/minigpt-high/best.pt` as-is — quality caveats documented here; the 4.9 retrain would replace this checkpoint when complete.
