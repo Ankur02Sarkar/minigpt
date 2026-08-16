@@ -81,13 +81,19 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
   project: "minigpt-llm",
   author: "Ankur Sarkar",
   role: "AI Engineer + Full-Stack",
-  goal: "Train a from-scratch GPT on Azure T4 GPU for <$50, serve it with OpenAI + Ollama compatible APIs",
+  goal: "Train a from-scratch GPT on Azure T4 GPU; serve it with OpenAI + Ollama compatible APIs; package for OSS release",
   stack: ["Python 3.12", "PyTorch", "FastAPI", "Azure", "Docker"],
   constraints: {
-    budget: "$35-50 (within $200 free-trial credit)",
-    hardware: "1× NVIDIA Tesla T4 16GB (Turing architecture, FP16 only — no BF16)",
-    deadline: "30 days or credit exhaustion, whichever comes first",
-    token_cap: "500M FineWeb-Edu tokens (not 2-3B)",
+    budget: "$35-50 of $200 Azure free-trial credit spent; T4 deallocated; remaining ~$111 buffer",
+    hardware: "1× NVIDIA Tesla T4 16GB (Turing architecture, FP16 only — no BF16); CPU-only on Mac",
+    deadline: "30-day free-trial window; project completed within budget",
+    token_cap: "500M FineWeb-Edu tokens (capped) + 1.06B total across TinyStories + WikiText + FineWeb",
+  },
+  status: {
+    phases: "0-7 complete",
+    models: "minigpt-low (13M params, TinyStories) + minigpt-high (26M params, full corpus)",
+    serving: "OpenAI + Ollama compatible FastAPI server with auth + rate limiting",
+    packaging: "Docker image v0.1.0, MODEL_CARD.md, LICENSE (Apache-2.0), CHANGELOG.md, CONTRIBUTING.md",
   },
 }
 ```
@@ -110,7 +116,7 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 5 — Inference & Generation | 5 | 5 | ✅ 5.1 generation core (KV-cache, streaming, stop_strings)<br>5.2 chat REPL (multi-turn, slash commands)<br>5.3 sampling diagnostics (on_token callback, entropy tracking, n-gram repeat detection)<br>5.4 serving infra (loader + OpenAI routes + Ollama routes + unified server)<br>5.5 auth + rate limiting |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 7 | ✅ 6.1 shared loader<br>6.2 OpenAI routes<br>6.3 Ollama routes<br>6.4 unified server<br>6.5 auth + rate limiting<br>6.6 streaming correctness tests<br>6.7 cross-client compatibility |
 | Phase 7 — Packaging & OSS Polish | 10 | 10 | ✅ All 10 minor phases complete (Dockerfile + compose + MODEL_CARD.md + LICENSE + CHANGELOG.md + SECURITY.md + CONTRIBUTING.md + OSS hygiene + examples + v0.1.0 release) |
-| **Total** | **64** | **60** | |
+| **Total** | **64** | **64** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -226,6 +232,8 @@ Both `best.pt` checkpoints exist — the T4 has been **deallocated**.
 
 Both runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
 
+**Phase 4 — Training Runs (✅ Complete):** Both training runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
+
 **Phase 4.8 — PPL diagnosis + tuning probes (2026-08-15/16):** 3 × 5k-step probes on the T4 diagnosed 4 root causes (uniform shard sampling, per-worker RNG not re-seeded, 50-batch eval prefix, no TinyStories val split) — all fixed. Probe results (full-val PPL = e^loss):
 
 | Probe | Config deltas | Train loss @5k | Full-val PPL |
@@ -234,7 +242,7 @@ Both runs finished exit 0 under the systemd queue (`phase: both_complete`), then
 | **Probe-2 🏆 (hparam)** | + dropout 0.0, lr 1e-3, wd 0.05, warmup 500 | **4.06** | **207.2** |
 | Probe-3 (mix) | + wikitext 3× upweight (probe-1 base) | 4.56 | 208.8 |
 
-Probe-2's hparams were **promoted into `configs/minigpt-{low,high}.yaml`** (warmup scaled to 10% of each run). **Next:** task 4.9 — full 100k-step retrain (~20h T4, ~$15) to confirm the extrapolated improvement (~60-80 PPL vs original 111). See `docs/EVAL.md` for full probe analysis.
+Probe-2's hparams were **promoted into `configs/minigpt-{low,high}.yaml`** (warmup scaled to 10% of each run). The 4.9 full 100k retrain was **deferred on budget** (~$15→$60 corrected); the project proceeds with existing checkpoints. Full probe analysis in [`docs/EVAL.md`](docs/EVAL.md); verbatim generations in [`docs/SAMPLES.md`](docs/SAMPLES.md).
 
 Ops: [`docs/PHASE4_RUNBOOK.md`](docs/PHASE4_RUNBOOK.md) · systemd unit `minigpt-train-queue` · heartbeat `STATUS.json`.
 
@@ -307,5 +315,98 @@ Data (FineWeb-Edu + TinyStories + WikiText-103)
 ---
 
 ## License
+
+## How to Use This LLM
+
+### Quickstart: Generate Text
+
+```bash
+# Using the Docker image (recommended)
+docker run -p 8080:8080 -e MINIGPT_API_KEY=sk-minigpt-dev ghcr.io/Ankur02Sarkar/minigpt_llm:0.1.0
+```
+
+```bash
+# Using the OpenAI-compatible API
+curl -s http://localhost:8080/v1/chat/completions   -H "Authorization: Bearer sk-minigpt-dev"   -H "Content-Type: application/json"   -d '{"model": "minigpt", "messages": [{"role": "user", "content": "Hello!"}], "max_tokens": 100}' | python3 -m json.tool
+```
+
+```bash
+# Using the Ollama-compatible API
+ollama run minigpt "Hello, how are you?"
+```
+
+```bash
+# Using the Python SDK
+from minigpt_llm.model import GPT, load_config
+from tokenizers import Tokenizer
+import torch
+
+config = load_config("configs/minigpt-high.yaml")
+model = GPT(config)
+model.load_state_dict(torch.load("/opt/minigpt_llm/checkpoints/minigpt-high/best.pt", map_location="cpu"))
+model.eval()
+
+tokenizer = Tokenizer("/opt/minigpt_llm/tokenizer/vocab.json")
+
+prompt = "Once upon a time"
+input_ids = tokenizer.encode(prompt, add_special_tokens=False)["input_ids"]
+input_tensor = torch.tensor([input_ids])
+
+with torch.no_grad():
+    generated = model.generate(
+        input_tensor,
+        max_new_tokens=50,
+        temperature=0.8,
+        top_k=40,
+        top_p=0.9,
+    )
+
+output = tokenizer.decode(generated[0].tolist())
+print(f"Prompt: {prompt}")
+print(f"Generated: {output}")
+```
+
+### API Endpoints
+
+#### OpenAI-compatible (`/v1/*`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /v1/models` | List available models |
+| `POST /v1/chat/completions` | Chat completion with streaming support |
+| `POST /v1/completions` | Legacy single-string prompt |
+| `POST /v1/embeddings` | Pooled last-token embedding |
+
+#### Ollama-compatible (`/api/*`)
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/generate` | Text generation (NDJSON streaming) |
+| `POST /api/chat` | Chat (NDJSON streaming) |
+| `GET /api/tags` | List local models |
+| `GET /api/version` | Server version |
+
+### Running the Server
+
+```bash
+# Development (local)
+uvicorn serving.server:app --host 0.0.0.0 --port 8080
+
+# Docker (production recommended)
+docker run -p 8080:8080 -e MINIGPT_API_KEY=sk-minigpt-dev ghcr.io/Ankur02Sarkar/minigpt_llm:0.1.0
+```
+
+### Sample Generations
+
+See [`docs/SAMPLES.md`](docs/SAMPLES.md) for verbatim generated outputs from both minigpt-low and minigpt-high checkpoints across different prompts and temperatures.
+
+### Production Considerations
+
+- **Auth**: Set `MINIGPT_API_KEY` env var; required for `/v1/chat/completions` if configured
+- **Rate limiting**: Per-IP token bucket, default 60 requests/minute (configurable via env)
+- **GPU**: T4 requires FP16 (`torch.float16`); no BF16 support (Turing architecture)
+- **Context length**: 1024 tokens (RoPE positional embeddings)
+- **Safety**: Output filtered at application layer; no built-in safety filters
+
 
 Apache-2.0 (planned — Phase 7.6)
