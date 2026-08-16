@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse
+import torch
 
 from serving.loader import get_model, get_tokenizer, get_config
 
@@ -127,8 +128,8 @@ def _sse_frame(data: dict) -> bytes:
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.post("/chat/completions")
-async def chat_completions(request: Request) -> StreamingResponse | JSONResponse:
+@router.post("/chat/completions", response_model=None)
+async def chat_completions(request: Request) -> Response:
     """``POST /v1/chat/completions`` — OpenAI-compatible chat endpoint.
 
     - ``stream=true``: returns ``StreamingResponse`` with SSE frames.

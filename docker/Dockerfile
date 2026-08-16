@@ -28,6 +28,7 @@ COPY inference /opt/minigpt_llm/inference
 COPY configs /opt/minigpt_llm/configs
 COPY scripts /opt/minigpt_llm/scripts
 COPY pyproject.toml /opt/minigpt_llm/pyproject.toml
+COPY README.md LICENSE /opt/minigpt_llm/
 
 # Create mount points for external artifacts
 RUN mkdir -p /opt/minigpt_llm/checkpoints /opt/minigpt_llm/tokenizer /opt/minigpt_llm/data

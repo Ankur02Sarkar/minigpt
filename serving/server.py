@@ -57,8 +57,36 @@ def _rate_allow(client_ip: str, rate_per_min: int = 60) -> bool:
         return False
 
 
+# ----------------------------------------------------------------------------
+# FastAPI app
+# ----------------------------------------------------------------------------
+
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from os import environ
 from typing import cast
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Automatically initialize model & tokenizer from environment if provided
+    model_path = environ.get("MINIGPT_MODEL_PATH") or environ.get("CHECKPOINT_PATH")
+    tokenizer_dir = environ.get("MINIGPT_TOKENIZER_DIR") or environ.get("TOKENIZER_DIR")
+    if model_path and tokenizer_dir:
+        try:
+            initialize(model_path, tokenizer_dir)
+        except Exception as e:
+            # Allow server to start so /health or debugging still works
+            pass
+    yield
+
+
+app = FastAPI(
+    title="minigpt_llm Serving API",
+    description="MiniGPT-llm — from-scratch GPT with OpenAI + Ollama endpoints",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 
 # ----------------------------------------------------------------------------
@@ -69,6 +97,10 @@ from typing import cast
 async def _middleware(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
+    # Public endpoints exempt from auth
+    if request.url.path in ("/health", "/ready", "/docs", "/openapi.json"):
+        return cast(Response, await call_next(request))
+
     # --- Auth (Bearer token) ---
     if _API_KEY is not None:
         auth = request.headers.get("Authorization", "")
@@ -94,36 +126,6 @@ async def _middleware(
 
     response = await call_next(request)
     return cast(Response, response)
-
-
-# ----------------------------------------------------------------------------
-# FastAPI app
-# ----------------------------------------------------------------------------
-
-from contextlib import asynccontextmanager
-from os import environ
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Automatically initialize model & tokenizer from environment if provided
-    model_path = environ.get("MINIGPT_MODEL_PATH") or environ.get("CHECKPOINT_PATH")
-    tokenizer_dir = environ.get("MINIGPT_TOKENIZER_DIR") or environ.get("TOKENIZER_DIR")
-    if model_path and tokenizer_dir:
-        try:
-            initialize(model_path, tokenizer_dir)
-        except Exception as e:
-            # Allow server to start so /health or debugging still works
-            pass
-    yield
-
-
-app = FastAPI(
-    title="minigpt_llm Serving API",
-    description="MiniGPT-llm — from-scratch GPT with OpenAI + Ollama endpoints",
-    version="0.1.0",
-    lifespan=lifespan,
-)
 
 
 @app.get("/health", include_in_schema=False)

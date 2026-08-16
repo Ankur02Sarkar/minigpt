@@ -15,8 +15,9 @@ import json
 import threading
 from typing import Any, AsyncGenerator, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+import torch
 
 from serving.loader import get_model, get_tokenizer, get_config
 
