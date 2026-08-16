@@ -18,7 +18,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +90,7 @@ def generate(
     stream: bool = False,
     device: torch.device | str = "cpu",
     seed: int | None = None,
+    on_token: Callable[[int, str, float, list[tuple[int, float]]], None] | None = None,
 ) -> str | Iterator[str]:
     """Generate text from ``prompt`` with KV-cache.
 
@@ -184,6 +185,16 @@ def generate(
                     stopped_by_str = True
                     break
         stopped = stopped_by_eos or stopped_by_str
+        # --- on-token observation callback ---
+        if on_token is not None:
+            probs = F.softmax(logits, dim=-1)
+            entropy = float(-(probs * torch.log(probs + 1e-10)).sum())
+            top5_vals, top5_idx = torch.topk(probs, 5)
+            top5: list[tuple[int, float]] = [
+                (int(idx.item()), float(val.item()))
+                for val, idx in zip(top5_vals, top5_idx, strict=False)
+            ]
+            on_token(next_id_int, piece, entropy, top5)
         return (piece, stopped)
 
     def _run() -> str:
