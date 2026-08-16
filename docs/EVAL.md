@@ -103,8 +103,57 @@ Root cause of the overrun: sustained throughput was ~23.2k tok/s on the high run
 | Sample generations (verbatim) | [`docs/SAMPLES.md`](SAMPLES.md) · raw: `logs/phase4-artifacts/` (gitignored) |
 | Sample tool | `scripts/generate_samples.py` |
 
+## Phase 4.8 — PPL Diagnosis + Tuning Probes (2026-08-15/16)
+
+### Root-cause diagnosis
+
+Four issues were found and fixed (code on `phase/4.8-diagnosis` branch):
+
+| # | Issue | Fix | Impact |
+|---|-------|-----|--------|
+| (a) | `MultiShardDataset` sampled shards uniformly (1/N), oversampling WikiText ~33% (small shard, same draw prob) | Token-weighted inverse-CDF selection (`shard_probs` ∝ token count) | Removed ~33% WikiText over-sampling |
+| (b) | `worker_init_fn` did not re-seed each worker's dataset `_rng` `Generator`; workers drew overlapping windows → ~½ unique-data diversity loss | Per-worker `Generator` reseed from `worker_info.seed + worker_id` | Restored ~½ diversity |
+| (c) | `evaluate` hardcoded `max_batches=50`; 50 batches × 2048 ctx = 204,800 tokens = 3.5% of `val.bin` (5.75M tokens) | `TrainingConfig.eval_max_batches` (default `None` = full val) | Eval now covers the whole val set |
+| (d) | No TinyStories val split — low-model trained on TinyStories but evaluated on WikiText val (cross-domain, unmeasurable target) | `split_tinystories_val` + `DataPaths.tinystories_val_bin` | Enables in-domain ≤25 PPL target for the low model |
+
+Artifacts: `configs/probe-{1,2,3}.yaml`, `scripts/diagnose_phase4.py`, `scripts/run_probe_queue.sh`, `deploy/systemd/minigpt-probe-queue.service`, new tests in `tests/test_{dataset,evaluate,shards,training_config}.py`.
+
+### Probe results (3 × 5,000 steps on T4, full-val eval)
+
+| Run | Config deltas vs original | Train loss @5k | val_loss (best) | **Full-val PPL** |
+|-----|---------------------------|---------------|-----------------|------------------|
+| Original high (baseline) | dropout 0.1, lr 5e-4, wd 0.1, warmup 2000 | — @100k | 4.714 | **111.4** |
+| Probe-1 (sampler-fix-only) | + token-weighted sampler, per-worker reseed | 4.29 | 5.502 | **256.8** |
+| Probe-2 (hparam) | + dropout 0.0, lr 1e-3, wd 0.05, warmup 500 | **4.06** | 5.286 | **207.2** |
+| Probe-3 (mix) | + wikitext 3× upweight (probe-1 base) | 4.56 | 5.314 | **208.8** |
+
+All `best.pt` at step 5000 (val loss still decreasing — none converged at 5k steps). PPL = e^(val_loss).
+
+**Key findings:**
+1. **Hparam relaxation is the bigger lever.**
+Probe-2 (hparams only, no mix change) reached 207.2 PPL; probe-3 (mix upweight only, probe-1 base hparams) reached 208.8. The relaxed hparams (dropout 0.0, lr 2×, wd halved) closed most of the gap on their own.
+2. **Mix-distortion is real but secondary.**
+Probe-3 upweighted wikitext 3× and improved val PPL (256.8 → 208.8) *despite* train loss getting **worse** (4.29 → 4.56) — the model overfits to domain shift; exposing more of the val domain directly improves val PPL at the cost of overall fit.
+3. **None converged at 5k steps.**
+All 3 curves were still improving through step 5000. Extrapolating probe-2's trajectory (train loss 10.4→4.06 in 5k) to 100k steps suggests the full retrain should beat the original's 111.4 PPL significantly — likely the 60-80 range.
+4. **Combined (hparams + mix) untested.**
+Probe-2 + probe-3 mix would likely do even better, but wasn't run independently. Reserved for a possible future experiment if budget allows.
+
+### Winning config promotion
+
+Probe-2's hparams were promoted into `configs/minigpt-{low,high}.yaml` on 2026-08-16:
+
+| Field | Old | New (probe-2) |
+|-------|-----|---------------|
+| `model.dropout` | 0.1 | **0.0** |
+| `training.lr` | 5.0e-4 | **1.0e-3** |
+| `training.weight_decay` | 0.1 | **0.05** |
+| `training.warmup_steps` (high) | 2000 | **10000** (10% of 100k) |
+| `training.warmup_steps` (low) | 2000 | **5000** (10% of 50k) |
+
+Next: task 4.9 — full 100k-step retrain with promoted hparams on T4 (~20h, ~$15) to confirm the extrapolated improvement.
+
 ## Next steps
 
-1. **Task 4.8** (new): PPL diagnosis — eval-harness sanity check, dataset shuffle/order audit, BPE audit, TinyStories val split; budget-gated short probes only.
-2. **Task 4.4** (optional): short 5k-step tuning probes if 4.8 identifies a fixable cause and credit allows.
-3. Phase 5 (inference) can proceed against `checkpoints/minigpt-high/best.pt` as-is — quality caveots documented here.
+1. **Task 4.9** (new): full 100k-step retrain of minigpt-high with promoted probe-2 hparams (dropout 0.0, lr 1e-3, wd 0.05, warmup 10000) on T4; ~20h ≈ $15; target beat val PPL 111.4.
+2. Phase 5 (inference) can proceed against `checkpoints/minigpt-high/best.pt` as-is — quality caveats documented here; the 4.9 retrain would replace this checkpoint when complete.

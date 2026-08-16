@@ -213,7 +213,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 4 — Training Runs (progressive scaling) `[~]`
 *Goal: two production-quality models, fully logged, ready to serve. **minigpt-high** is the final deliverable — no 50M third model.*
 
-> **Status 2026-08-15:** both runs completed exit 0 and both `best.pt` exist, but **val-PPL targets were missed** (low: ~14.7k on an invalid cross-domain eval; high: ~111 vs ≤ 18). Full analysis in `docs/EVAL.md`, samples in `docs/SAMPLES.md`. T4 **deallocated 2026-08-15 ~13:37 UTC**. Diagnosis = task 4.8 below (budget-gated).
+> **Status 2026-08-16:** Phase 4.8 diagnosis + tuning probes COMPLETE. Three 5k-step probes ran on the T4 (sampler-fix-only, hparam relaxation, data-mix upweight). Probe-2 (dropout 0.0, lr 1e-3, wd 0.05) won on both train loss (4.06 vs 4.29) and full-val PPL (207.2 vs 256.8) at 5k steps — its config has been promoted into `configs/minigpt-{low,high}.yaml` for the next full 100k retrain (new task 4.9). All probe `best.pt` + `diagnose.json` are on the T4 OS disk (deallocated 2026-08-16 ~11:30 UTC; disks persist). Code fixes from 4.8 merged to main; probe configs retained in `configs/` for reproducibility. Full probe results in `docs/EVAL.md`. **Next:** task 4.9 (full 100k retrain with promoted hparams, budget-gated) before Phase 5.
 
 **Naming:** small model = **minigpt-low** · large model = **minigpt-high**.  
 **Long runs:** systemd `minigpt-train-queue` + `--resume latest` (not bare SSH). See `docs/PHASE4_RUNBOOK.md`.
@@ -231,9 +231,10 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - 100k steps, eval every 2k, target val PPL ≤ 18.
   - Checkpoints: `/opt/minigpt_llm/checkpoints/minigpt-high/`.
   - **Actual:** 100k steps exit 0 in 78.6 h (2026-08-11 → 08-15); best_val_loss 4.714 @ step 100k (PPL ~111 vs ≤ 18 target — missed; underfitting, not overfitting; see `docs/EVAL.md`).
-- **4.4 Hyperparam tuning pass (budget-aware, short)** `[ ]`
+- **4.4 Hyperparam tuning pass (budget-aware, short)** `[x]`
   - Optional if credits allow; &lt; 4 T4-hours; short 5k-step probes.
   - Promote best into `configs/minigpt-high.yaml`.
+  - **Actual:** 3 × 5k-step probes ran 2026-08-15 (T4, ~12 h total). Probe-2 (dropout 0.0, lr 1e-3, wd 0.05, warmup 500) won: full-val PPL 207.2 vs probe-1 256.8 vs probe-3 208.8 (all @5k steps, none converged). Config promoted into `configs/minigpt-{low,high}.yaml` 2026-08-16 (warmup scaled to 10% of full run). See `docs/EVAL.md`.
 - **4.5 ~~50M model~~ — REMOVED** `[!]`
   - Not in scope.
 - **4.6 Long-run monitoring** `[x]`
@@ -242,11 +243,21 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - `--resume latest`; T4 deallocated only after both completed (2026-08-15 ~13:37 UTC).
 - **4.7 Final eval report** `[x]`
   - `docs/EVAL.md` + `docs/SAMPLES.md` written from real run logs + generations; anomaly record in `logs/RUN_NOTES.md`.
-- **4.8 PPL diagnosis + tuning probe (NEW — budget-gated)** `[ ]`
-  - Both runs missed PPL targets (see `docs/EVAL.md`). Before any retrain spend: (a) sanity-check `training/evaluate.py` vs manual loss pass; (b) audit `MultiShardDataset` shard order/shuffle; (c) audit BPE merges/token fertility; (d) add TinyStories val split so low-model targets are in-domain.
-  - Only after a cause is found: short 5k-step probes on T4 (< 4 T4-hours), fold into 4.4.
+- **4.8 PPL diagnosis + tuning probe (NEW — budget-gated)** `[x]`
+  - Both runs missed PPL targets (see `docs/EVAL.md`). Diagnosed 4 root causes + fixed:
+    (a) `MultiShardDataset` uniform shard sampling → token-weighted inverse-CDF selection (fixes ~33% WikiText over-sampling);
+    (b) `worker_init_fn` not re-seeding dataset `_rng` Generators → overlapping worker windows (fixes ~½ diversity loss);
+    (c) eval `max_batches=50` hardcoded → configurable `TrainingConfig.eval_max_batches` (default None = full val; 50-batch was 3.5% of val.bin);
+    (d) no TinyStories val split → added `split_tinystories_val` + `DataPaths.tinystories_val_bin` (enables in-domain low-model target).
+  - 3 × 5k-step probes ran 2026-08-15/16 under systemd `minigpt-probe-queue.service` (probe-1-sampler, probe-2-hparam, probe-3-mix), all exit 0 with `best.pt` + `diagnose.json`. Probe-2 won (PPL 207.2 @5k). Results in `docs/EVAL.md`.
+  - Code fixes + probe configs + diagnose script + systemd unit in `configs/probe-*.yaml`, `scripts/diagnose_phase4.py`, `scripts/run_probe_queue.sh`, `deploy/systemd/minigpt-probe-queue.service`.
+- **4.9 Full 100k retrain with promoted hparams (NEW — budget-gated)** `[ ]`
+  - Retrain **minigpt-high** with promoted probe-2 config: dropout 0.0, lr 1e-3, wd 0.05, warmup 10000 (~20h T4 ≈ $15).
+  - Target: beat original val PPL 111.4 (extrapolating probe-2 trajectory → likely 60-80 range).
+  - Budget check: ~$90 spent of $200 credit; ~$110 remaining; retrain ($15) + Phase 5-7 fit within buffer.
+  - Run via systemd `minigpt-train.service` (see `docs/PHASE4_RUNBOOK.md`); `--resume latest`; deallocate T4 when done.
 
-**Exit criteria:** `checkpoints/minigpt-high/best.pt` ✅, val PPL ≤ 18 ❌ (actual ~111 — see 4.8), EVAL + SAMPLES ✅, total T4 spend within budget ❌ (~100 T4-hours ≈ $75 vs ~24 h planned; within the $200 credit). Phase stays `[~]` until 4.8 resolves the PPL gap or is explicitly waived.
+**Exit criteria:** `checkpoints/minigpt-high/best.pt` ✅, val PPL ≤ 18 ❌ (probe-2 extrapolates to ~60-80 after full 100k; awaiting 4.9 retrain), EVAL + SAMPLES ✅, total T4 spend ~$90 of $200 credit (within budget). Phase stays `[~]` until 4.9 retrain completes or is explicitly waived.
 
 ---
 

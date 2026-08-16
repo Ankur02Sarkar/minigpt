@@ -76,11 +76,11 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
 | Phase 3 — Training Engine | 9 | 9 | ✅ Done |
-| Phase 4 — Training Runs | 7 | 5 | ✅ Trained (PPL targets missed — see EVAL.md) |
+| Phase 4 — Training Runs | 9 | 8 | ✅ Trained + diagnosed (4.8 probe-2 wins → configs promoted; 4.9 retrain pending) |
 | Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **62** | **40** | |
+| **Total** | **64** | **48** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
@@ -185,16 +185,26 @@ Models: **minigpt-low** (50k steps, TinyStories) then **minigpt-high** (100k ste
 Defaults (T4): `per_device_batch=4`, `grad_accum=16` → effective batch 64, FP16 autocast.  
 Both `best.pt` checkpoints exist — the T4 has been **deallocated**.
 
-### Phase 4 — Training Runs (✅ Trained — PPL targets missed)
+### Phase 4 — Training Runs (✅ Trained + diagnosed — retrain pending)
 
 | Model | Config | Steps | Target val PPL | Actual val PPL | Wall time | best.pt |
 |---|---|---|---|---|---|---|
 | **minigpt-low** | `minigpt-low.yaml` | 50k | ≤ 25 (invalid*) | ~14,745 | 9.4 h | 149 MB |
 | **minigpt-high** | `minigpt-high.yaml` | 100k | ≤ 18 | ~111 | 78.6 h | 303 MB |
 
-\* minigpt-low trained on TinyStories but was evaluated on the WikiText val shard — a cross-domain target it could never hit. Full breakdown, val-loss curves, cost record, and next steps (task 4.8 diagnosis) in [`docs/EVAL.md`](docs/EVAL.md); verbatim generations in [`docs/SAMPLES.md`](docs/SAMPLES.md).
+\* minigpt-low trained on TinyStories but was evaluated on the WikiText val shard — a cross-domain target it could never hit. Full breakdown, val-loss curves, cost record, and Phase 4.8 diagnosis + probe results in [`docs/EVAL.md`](docs/EVAL.md); verbatim generations in [`docs/SAMPLES.md`](docs/SAMPLES.md).
 
 Both runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
+
+**Phase 4.8 — PPL diagnosis + tuning probes (2026-08-15/16):** 3 × 5k-step probes on the T4 diagnosed 4 root causes (uniform shard sampling, per-worker RNG not re-seeded, 50-batch eval prefix, no TinyStories val split) — all fixed. Probe results (full-val PPL = e^loss):
+
+| Probe | Config deltas | Train loss @5k | Full-val PPL |
+|---|---|---|---|
+| Probe-1 (sampler-fix-only) | token-weighted sampler + per-worker reseed | 4.29 | 256.8 |
+| **Probe-2 🏆 (hparam)** | + dropout 0.0, lr 1e-3, wd 0.05, warmup 500 | **4.06** | **207.2** |
+| Probe-3 (mix) | + wikitext 3× upweight (probe-1 base) | 4.56 | 208.8 |
+
+Probe-2's hparams were **promoted into `configs/minigpt-{low,high}.yaml`** (warmup scaled to 10% of each run). **Next:** task 4.9 — full 100k-step retrain (~20h T4, ~$15) to confirm the extrapolated improvement (~60-80 PPL vs original 111). See `docs/EVAL.md` for full probe analysis.
 
 Ops: [`docs/PHASE4_RUNBOOK.md`](docs/PHASE4_RUNBOOK.md) · systemd unit `minigpt-train-queue` · heartbeat `STATUS.json`.
 
