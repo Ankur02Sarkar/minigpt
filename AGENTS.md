@@ -306,10 +306,10 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 - **6.5 Auth + rate limiting** `[x]`
   - Optional `Authorization: Bearer <key>` checked against `.env`-defined keys.
   - Per-IP token bucket; default 60 req/min, configurable.
-- **6.6 Streaming correctness tests** `[~]`
+- **6.6 Streaming correctness tests** `[x]`
   - SSE frames parse as expected; NDJSON frames are line-delimited.
   - `stop` reason is one of `stop|length|content_filter`.
-- **6.7 Cross-client compatibility** `[~]`
+- **6.7 Cross-client compatibility** `[x]`
   - Verify with `openai-python` SDK against `/v1/chat/completions`.
   - Verify with the official Ollama CLI against `/api/chat` and `/api/generate`.
   - Pin client versions in `tests/integration/requirements.txt`.
