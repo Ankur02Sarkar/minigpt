@@ -27,10 +27,10 @@ COPY training /opt/minigpt_llm/training
 COPY inference /opt/minigpt_llm/inference
 COPY configs /opt/minigpt_llm/configs
 COPY scripts /opt/minigpt_llm/scripts
-COPY docs /opt/minigpt_llm/docs
-COPY tokenizer /opt/minigpt_llm/tokenizer
-COPY checkpoints /opt/minigpt_llm/checkpoints
-COPY data /opt/minigpt_llm/data
+COPY pyproject.toml /opt/minigpt_llm/pyproject.toml
+
+# Create mount points for external artifacts
+RUN mkdir -p /opt/minigpt_llm/checkpoints /opt/minigpt_llm/tokenizer /opt/minigpt_llm/data
 
 # Install package in editable mode
 RUN pip install --no-cache-dir -e .
@@ -55,9 +55,10 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /opt/minigpt_llm/minigpt_llm /opt/minigpt_llm/minigpt_llm
 COPY --from=builder /opt/minigpt_llm/serving /opt/minigpt_llm/serving
-COPY --from=builder /opt/minigpt_llm/checkpoints /opt/minigpt_llm/checkpoints
-COPY --from=builder /opt/minigpt_llm/tokenizer /opt/minigpt_llm/tokenizer
-COPY --from=builder /opt/minigpt_llm/.env /opt/minigpt_llm/.env.example 2>/dev/null || true
+COPY --from=builder /opt/minigpt_llm/inference /opt/minigpt_llm/inference
+COPY --from=builder /opt/minigpt_llm/configs /opt/minigpt_llm/configs
+RUN mkdir -p /opt/minigpt_llm/checkpoints /opt/minigpt_llm/tokenizer /opt/minigpt_llm/data && \
+    chown -R minigpt:minigpt /opt/minigpt_llm
 
 # Set as minigpt user
 USER minigpt

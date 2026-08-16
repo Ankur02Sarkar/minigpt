@@ -57,12 +57,18 @@ def _rate_allow(client_ip: str, rate_per_min: int = 60) -> bool:
         return False
 
 
+from collections.abc import Awaitable, Callable
+from typing import cast
+
+
 # ----------------------------------------------------------------------------
 # HTTP middleware that applies rate limiting + optional auth
 # ----------------------------------------------------------------------------
 
 @app.middleware("http")
-async def _middleware(request: Request, call_next) -> Response:
+async def _middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     # --- Auth (Bearer token) ---
     if _API_KEY is not None:
         auth = request.headers.get("Authorization", "")
@@ -87,17 +93,36 @@ async def _middleware(request: Request, call_next) -> Response:
         )
 
     response = await call_next(request)
-    return response
+    return cast(Response, response)
 
 
 # ----------------------------------------------------------------------------
 # FastAPI app
 # ----------------------------------------------------------------------------
 
+from contextlib import asynccontextmanager
+from os import environ
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Automatically initialize model & tokenizer from environment if provided
+    model_path = environ.get("MINIGPT_MODEL_PATH") or environ.get("CHECKPOINT_PATH")
+    tokenizer_dir = environ.get("MINIGPT_TOKENIZER_DIR") or environ.get("TOKENIZER_DIR")
+    if model_path and tokenizer_dir:
+        try:
+            initialize(model_path, tokenizer_dir)
+        except Exception as e:
+            # Allow server to start so /health or debugging still works
+            pass
+    yield
+
+
 app = FastAPI(
     title="minigpt_llm Serving API",
     description="MiniGPT-llm — from-scratch GPT with OpenAI + Ollama endpoints",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -111,7 +136,8 @@ def health() -> JSONResponse:
 def ready() -> JSONResponse:
     """Readiness probe — model + tokenizer must be initialized."""
     try:
-        initialize(str(args.model), str(args.tokenizer_dir))
+        get_model()
+        get_tokenizer()
         return JSONResponse(content={"status": "ready"})
     except Exception as e:
         return JSONResponse(content={"status": "not_ready", "error": str(e)}, status_code=500)
