@@ -73,9 +73,17 @@ docker run -p 8080:8080 -e MINIGPT_MODEL_PATH=/opt/minigpt_llm/checkpoints/minig
 
 Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset licenses: [`docs/DATA_LICENSES.md`](docs/DATA_LICENSES.md).
 
----
+## About MiniGPT & Project Scope
 
-## About Me
+> [!NOTE]
+> ### 💡 Research & Educational Focus
+> **MiniGPT** is an end-to-end, from-scratch implementation of a **compact 13M–26M parameter language model**. It is designed as an educational and systems engineering showcase — built, trained, and served on a strictly budgeted single cloud GPU ($35–50 Azure spend).
+>
+> Unlike multi-billion parameter commercial models (e.g. GPT-4, Llama-3, Claude) trained on massive compute clusters, MiniGPT's goal is **not** to compete on general conversational intelligence or open-domain factual reasoning. Instead, its purpose is to demonstrate **rigorous AI infrastructure and systems design**:
+> - **From-Scratch Architecture:** RoPE positional embeddings, SwiGLU activations, RMSNorm, and multi-head attention without high-level wrappers.
+> - **Custom Tokenization & Data Sharding:** 32k ByteLevel BPE tokenizer, token-weighted streaming datasets, and zero-copy binary `.bin` mmap pipelines.
+> - **Inference Optimization:** Autoregressive KV-cache decode loops (~80+ tok/s on CPU) with repetition penalty and temperature/top-k/top-p sampling.
+> - **Production Serving:** Microservice architecture with unified OpenAI `/v1/*` (SSE streaming) and Ollama `/api/*` APIs in Docker.
 
 ```js
 {
