@@ -19,7 +19,8 @@ git clone https://github.com/Ankur02Sarkar/minigpt.git
 cd minigpt
 
 # Set up env
-python3.12 -m venv .venv && source .venv/bin/activate
+uv venv --python 3.12 .venv
+source .venv/bin/activate
 uv pip install -r requirements.txt -r requirements-dev.txt
 uv pip install -e .
 
