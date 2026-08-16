@@ -8,7 +8,23 @@ Complete guide to running and interacting with the `minigpt_llm` serving contain
 
 ### Method A: Running with Docker (Recommended)
 
-To start the serving container with the API key configured:
+#### 1. Running with Trained Weights & Tokenizer
+Mount your local `./checkpoints` and `./tokenizer` directories into the container to use the trained 26M/13M models and 32k BPE vocabulary:
+
+```bash
+docker run -d \
+  --name minigpt_serve \
+  -p 8080:8080 \
+  -e MINIGPT_API_KEY=<MINIGPT_API_KEY> \
+  -e MINIGPT_MODEL_PATH=/opt/minigpt_llm/checkpoints/minigpt-high/best.pt \
+  -e MINIGPT_TOKENIZER_DIR=/opt/minigpt_llm/tokenizer \
+  -v "$(pwd)/checkpoints:/opt/minigpt_llm/checkpoints:ro" \
+  -v "$(pwd)/tokenizer:/opt/minigpt_llm/tokenizer:ro" \
+  minigpt_llm:0.1.0
+```
+
+#### 2. Running in Offline Mock/Demo Mode (No Checkpoints Required)
+If checkpoints are not mounted, the server automatically starts with an in-memory mock model to allow interface testing without weights:
 
 ```bash
 docker run -d \
@@ -17,20 +33,6 @@ docker run -d \
   -e MINIGPT_API_KEY=<MINIGPT_API_KEY> \
   minigpt_llm:0.1.0
 ```
-
-To run with mounted model checkpoints and tokenizer from disk (e.g. on Azure GPU VM or custom training output):
-
-```bash
-docker run -d \
-  --name minigpt_serve \
-  -p 8080:8080 \
-  -e MINIGPT_API_KEY=<MINIGPT_API_KEY> \
-  -v /path/to/checkpoints:/opt/minigpt_llm/checkpoints:ro \
-  -v /path/to/tokenizer:/opt/minigpt_llm/tokenizer:ro \
-  minigpt_llm:0.1.0
-```
-
-> **Note on Local CPU Execution**: When running locally without mounted Azure GPU checkpoints, the server automatically boots an in-memory test model to verify all API interfaces end-to-end.
 
 ---
 
@@ -306,8 +308,43 @@ curl -s http://localhost:8080/api/chat \
 
 ---
 
-## 4. Stopping the Server
-
-```bash
-docker stop minigpt_serve
-```
+## 4. Managing the Docker Container
+ 
+ ### Check Status & Logs
+ ```bash
+ # Check if container is running
+ docker ps --filter "name=minigpt_serve"
+ 
+ # View live logs
+ docker logs -f minigpt_serve
+ ```
+ 
+ ### Stop the Container
+ ```bash
+ docker stop minigpt_serve
+ ```
+ 
+ ### Restart the Container
+ ```bash
+ # Restart an existing container
+ docker restart minigpt_serve
+ ```
+ 
+ ### Remove & Recreate Container
+ If you change environment variables, model mounts, or ports, remove the existing container before creating a new one:
+ 
+ ```bash
+ # Force remove existing container
+ docker rm -f minigpt_serve
+ 
+ # Start fresh container with updated config
+ docker run -d \
+   --name minigpt_serve \
+   -p 8080:8080 \
+   -e MINIGPT_API_KEY=<MINIGPT_API_KEY> \
+   -e MINIGPT_MODEL_PATH=/opt/minigpt_llm/checkpoints/minigpt-high/best.pt \
+   -e MINIGPT_TOKENIZER_DIR=/opt/minigpt_llm/tokenizer \
+   -v "$(pwd)/checkpoints:/opt/minigpt_llm/checkpoints:ro" \
+   -v "$(pwd)/tokenizer:/opt/minigpt_llm/tokenizer:ro" \
+   minigpt_llm:0.1.0
+ ```
