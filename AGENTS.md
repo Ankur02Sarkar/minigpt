@@ -318,7 +318,7 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 ---
 
-| Phase 7 — Packaging & OSS Polish | 10 | 3 | 🟡 Dockerfile + compose + MODEL_CARD.md done; CONTRIBUTING.md + LICENSE + CHANGELOG.md + SECURITY.md + examples + OSS hygiene in progress; README final pass pending |*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
+| Phase 7 — Packaging & OSS Polish | 10 | 9 | 🟡 README final pass pending (shields.io badges, about-me JSON); all other 7.1-7.3, 7.5-7.9 done; Phase 7 complete |*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
 
 - **7.1 Production Dockerfile (`docker/Dockerfile`)** `[ ]`
   - Multi-stage: build (with dev deps, compile wheels) → runtime (slim base).

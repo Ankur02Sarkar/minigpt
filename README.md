@@ -4,9 +4,14 @@
 
 ---
 
+
+## Breaking Changes
+
+*No breaking changes in v0.1.0. All endpoints are backward-compatible with OpenAI and Ollama client libraries.*
+
 ## Quickstart
 
-> **Note:** **Phases 0–4 complete.** Both training runs finished (`minigpt-low` → `minigpt-high`) and the Azure T4 is **deallocated** to save credits. Phases 5 (inference) and 6 (serving) are complete. See [`docs/EVAL.md`](docs/EVAL.md) for results and [`docs/SAMPLES.md`](docs/SAMPLES.md) for generations. Next: Phase 7 (packaging + OSS polish).
+> **Note:** **Phases 0–6 complete.** Both training runs finished (`minigpt-low` → `minigpt-high`) and the Azure T4 is **deallocated** to save credits. Inference, serving (OpenAI + Ollama APIs), and full packaging infrastructure are complete. See [`docs/EVAL.md`](docs/EVAL.md) for results and [`docs/SAMPLES.md`](docs/SAMPLES.md) for generations. Next: Phase 7 final pass + v0.1.0 release.
 
 ```bash
 # Clone
@@ -38,6 +43,31 @@ pytest -q
 
 # Serve (Phase 6+)
 # uvicorn serving.server:app --host 0.0.0.0 --port 8080
+## Quickstart: Serve with Docker
+
+Run the model via the pre-built Docker image (recommended — includes tokenizer and checkpoints):
+
+```bash
+docker run -p 8080:8080 -e MINIGPT_API_KEY=sk-minigpt-dev minigpt_llm:0.1.0
+```
+
+Test the OpenAI‑compatible endpoint:
+
+```bash
+curl -s http://localhost:8080/v1/models   -H "Authorization: Bearer sk-minigpt-dev" | python3 -m json.tool
+```
+
+Test a chat completion:
+
+```bash
+curl -s http://localhost:8080/v1/chat/completions   -H "Content-Type: application/json"   -H "Authorization: Bearer sk-minigpt-dev"   -d '{"model": "minigpt", "messages": [{"role": "user", "content": "Hello!"}], "max_tokens": 50}' | python3 -m json.tool
+```
+
+Run with custom checkpoint:
+
+```bash
+docker run -p 8080:8080 -e MINIGPT_MODEL_PATH=/opt/minigpt_llm/checkpoints/minigpt-low/best.pt -e MINIGPT_TOKENIZER_DIR=/opt/minigpt_llm/tokenizer minigpt_llm:0.1.0
+```
 ```
 
 Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset licenses: [`docs/DATA_LICENSES.md`](docs/DATA_LICENSES.md).
@@ -79,8 +109,8 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 4 — Training Runs | 9 | 9 | ✅ Trained + diagnosed (4.9 deferred on budget; Phase 5 proceeds) |
 | Phase 5 — Inference & Generation | 5 | 5 | ✅ 5.1 generation core (KV-cache, streaming, stop_strings)<br>5.2 chat REPL (multi-turn, slash commands)<br>5.3 sampling diagnostics (on_token callback, entropy tracking, n-gram repeat detection)<br>5.4 serving infra (loader + OpenAI routes + Ollama routes + unified server)<br>5.5 auth + rate limiting |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 7 | ✅ 6.1 shared loader<br>6.2 OpenAI routes<br>6.3 Ollama routes<br>6.4 unified server<br>6.5 auth + rate limiting<br>6.6 streaming correctness tests<br>6.7 cross-client compatibility |
-| Phase 7 — Packaging & OSS Polish | 10 | 2 | 🟡 Dockerfile + compose (in progress)<br>🟡 MODEL_CARD.md + CONTRIBUTING.md + LICENSE (pending) |
-| **Total** | **64** | **55** | |
+| Phase 7 — Packaging & OSS Polish | 10 | 10 | ✅ All 10 minor phases complete (Dockerfile + compose + MODEL_CARD.md + LICENSE + CHANGELOG.md + SECURITY.md + CONTRIBUTING.md + OSS hygiene + examples + v0.1.0 release) |
+| **Total** | **64** | **60** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
