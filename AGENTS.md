@@ -264,10 +264,12 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 5 — Inference & Generation
 *Goal: a clean Python API for prompting the trained model with KV-cache, streaming, and stopping criteria.*
 
-- **5.1 Generation core (`inference/generate.py`)** `[ ]`
-  - `generate(model, tokenizer, prompt, max_new_tokens, temperature, top_k, top_p, stop_strings, stream)`.
-  - KV-cache; respects `stop_strings` and `eos_token_id`.
-  - Generator that yields tokens (stream=True) or returns the full string.
+- **5.1 Generation core (`inference/generate.py`)** `[x]`
+  - `generate(model, tokenizer, prompt, max_new_tokens, temperature, top_k, top_p, stop_strings, stream, device, seed)`.
+  - KV-cache decode loop (re-implemented in `inference/`, not in `GPT.generate()` — keeps model tokenizer-agnostic); respects `stop_strings` (generated-text-only, OpenAI semantics) and `eos_token_id`.
+  - `stream=True` yields incremental pieces; `stream=False` returns the full generated string (prompt excluded, matches `choices[0].text`).
+  - Mirrors `model._sample_next` semantics (greedy/top_k/top_p); `seed` makes sampling reproducible without touching global RNG.
+  - 13 CPU tests in `tests/test_inference_generate.py` (tiny BPE + 2-layer GPT fixture); 47+ existing tests unaffected.
 - **5.2 Interactive chat loop (`inference/chat.py`)** `[ ]`
   - Readline-based REPL; system prompt configurable; multi-turn history in memory.
   - `/reset`, `/system`, `/temp`, `/tokens` slash commands.

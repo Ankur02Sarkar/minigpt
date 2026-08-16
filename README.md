@@ -77,7 +77,7 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
 | Phase 3 — Training Engine | 9 | 9 | ✅ Done |
 | Phase 4 — Training Runs | 9 | 8 | ✅ Trained + diagnosed (4.9 retrain deferred on budget — Phase 5 proceeds) |
-| Phase 5 — Inference & Generation | 3 | 0 | ⏳ Pending |
+| Phase 5 — Inference & Generation | 3 | 1 | 🔄 5.1 generation core done (KV-cache, streaming, stop_strings) |
 | Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
 | Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
 | **Total** | **64** | **48** | |
