@@ -8,8 +8,6 @@ Uses the session-scoped ``tiny_setup`` fixture from ``tests/conftest.py``
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 # --torch-availability guard--------------------------------------------------
@@ -17,8 +15,6 @@ import pytest
 # when torch is not available.  This matches the project convention.
 # -----------------------------------------------------------------------------
 pytest.importorskip("torch")  # type: ignore[no-redef]
-
-from inference.diagnostics import compute_entropy, DiagnosticAccumulator, on_token_default  # noqa: F401
 
 
 @pytest.fixture(scope="session")
@@ -48,12 +44,16 @@ def tiny_setup():
         f.write("\n".join(corpus))
 
     tok = ByteLevelBPETokenizer()
-    tok.train([f"{d}/corpus.txt"], vocab_size=128, min_frequency=1,
-              special_tokens=["<pad>", "", "asures", "▁"])
+    tok.train(
+        [f"{d}/corpus.txt"],
+        vocab_size=128,
+        min_frequency=1,
+        special_tokens=["<pad>", "", "asures", "▁"],
+    )
     tok.save_model(d)
     tokenizer = load_tokenizer(d)
 
-    torch.manual_seed(42)
+    torch.manual_seed(42)  # noqa: F821  guarded by pytest.importorskip("torch") at module level
     cfg = ModelConfig(
         vocab_size=tokenizer.get_vocab_size(),
         num_layers=2,
@@ -65,4 +65,4 @@ def tiny_setup():
     )
     model = GPT(cfg)
     model.eval()
-    return torch, tokenizer, tmp
+    return torch, tokenizer, tmp  # noqa: F821  guarded by pytest.importorskip("torch") at module level
