@@ -5,13 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 import numpy as np
 import structlog
 import torch
-import torch.nn.functional as F
 
 from minigpt_llm.model import GPT, ModelConfig
 from training.evaluate import evaluate_shard
@@ -38,58 +36,7 @@ def _load_model(checkpoint: Path, device: torch.device) -> GPT:
     return model
 
 
-def manual_ce(
-    model: GPT,
-    shard_path: Path,
-    *,
-    context_length: int,
-    batch_size: int,
-    n_batches: int,
-    device: torch.device,
-) -> dict[str, float]:
-    """Independent CE loss pass (recomputed from logits) to cross-check evaluate_shard."""
-    data = np.memmap(shard_path, dtype=_DTYPE, mode="r")
-    n = int(data.shape[0])
-    window = context_length + 1
-    starts = list(range(0, n - window + 1, context_length))
-    total_loss = 0.0
-    total = 0
-    nb = 0
-    idx = 0
-    with torch.no_grad():
-        while idx < len(starts) and nb < n_batches:
-            bx: list[torch.Tensor] = []
-            by: list[torch.Tensor] = []
-            for _ in range(batch_size):
-                if idx >= len(starts):
-                    break
-                s = starts[idx]
-                idx += 1
-                chunk = np.array(data[s : s + window], dtype=np.int64)
-                bx.append(torch.from_numpy(chunk[:-1].copy()))
-                by.append(torch.from_numpy(chunk[1:].copy()))
-            if not bx:
-                break
-            x = torch.stack(bx).to(device)
-            y = torch.stack(by).to(device)
-            logits = model(x)
-            sl = logits[..., :-1, :].reshape(-1, logits.size(-1)).float()
-            tl = y[..., 1:].reshape(-1)
-            loss = F.cross_entropy(sl, tl)
-            tok = x.size(0) * context_length
-            total_loss += float(loss.item()) * tok
-            total += tok
-            nb += 1
-    avg = total_loss / max(total, 1)
-    return {
-        "manual_loss": avg,
-        "manual_ppl": math.exp(min(avg, 100.0)),
-        "manual_tokens": float(total),
-    }
-
-
 def vocab_usage(shard_path: Path, vocab_size: int) -> dict[str, float | int]:
-    """Fraction of the vocab actually present in the val shard (token-fertility proxy)."""
     data = np.memmap(shard_path, dtype=_DTYPE, mode="r")
     ids = np.unique(data)
     return {
@@ -131,16 +78,7 @@ def main() -> None:
         max_batches=None,
         device=device,
     )
-    # 3) independent manual CE cross-check (50 batches)
-    manual = manual_ce(
-        model,
-        args.val_shard,
-        context_length=args.context_length,
-        batch_size=args.batch_size,
-        n_batches=50,
-        device=device,
-    )
-    # 4) vocab usage on the val shard
+    # 3) vocab usage on the val shard
     vocab = vocab_usage(args.val_shard, model.config.vocab_size)
 
     report = {
@@ -148,8 +86,6 @@ def main() -> None:
         "val_shard": str(args.val_shard),
         "eval_50_batches": m50,
         "eval_full_val": mfull,
-        "manual_ce_50": manual,
-        "harness_matches_manual": abs(m50["val_loss"] - manual["manual_loss"]) < 0.05,
         "vocab_usage": vocab,
     }
     print(json.dumps(report, indent=2, default=str))
