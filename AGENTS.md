@@ -284,26 +284,26 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 ### Phase 6 — Serving (OpenAI + Ollama APIs)
 *Goal: a FastAPI server that is a drop-in replacement for both OpenAI's `/v1/*` and Ollama's `/api/*` endpoints.*
 
-- **6.1 Shared model loader (`serving/loader.py`)** `[ ]`
+- **6.1 Shared model loader (`serving/loader.py`)** `[x]`
   - Lazy-load on first request; hold in module-level singleton; thread-safe.
   - Warm-up pass on load to avoid first-request latency spike.
-- **6.2 OpenAI-compatible routes (`serving/app_openai.py`)** `[ ]`
+- **6.2 OpenAI-compatible routes (`serving/app_openai.py`)** `[x]`
   - `POST /v1/chat/completions` — supports `stream=true` (SSE) and `stream=false`.
   - `POST /v1/completions` — legacy single-string prompt.
   - `GET /v1/models` — returns `{data: [{id, owned_by, created}]}`.
   - `POST /v1/embeddings` — pooled last-token embedding (if hidden_size matches a registered encoder).
   - Pydantic request/response models mirroring OpenAI's schema byte-for-byte.
-- **6.3 Ollama-compatible routes (`serving/app_ollama.py`)** `[ ]`
+- **6.3 Ollama-compatible routes (`serving/app_ollama.py`)** `[x]`
   - `POST /api/generate` — NDJSON streaming.
   - `POST /api/chat` — NDJSON streaming.
   - `GET /api/tags` — list local models.
   - `GET /api/version` — return server version.
   - `POST /api/show` — return model info.
-- **6.4 Unified server entry (`serving/server.py`)** `[ ]`
+- **6.4 Unified server entry (`serving/server.py`)** `[x]`
   - Mounts both routers on a single FastAPI app; `/health` and `/ready` for k8s-style probes.
   - `uvicorn serving.server:app --host 0.0.0.0 --port 8080`.
   - `--model` flag chooses the checkpoint; `--api openai|ollama|both`.
-- **6.5 Auth + rate limiting** `[ ]`
+- **6.5 Auth + rate limiting** `[x]`
   - Optional `Authorization: Bearer <key>` checked against `.env`-defined keys.
   - Per-IP token bucket; default 60 req/min, configurable.
 - **6.6 Streaming correctness tests** `[ ]`

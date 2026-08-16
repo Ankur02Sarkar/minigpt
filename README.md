@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-> **Note:** **Phase 1–4 complete.** Both training runs finished (`minigpt-low` → `minigpt-high`) and the Azure T4 is **deallocated** to save credits. See [`docs/EVAL.md`](docs/EVAL.md) for results and [`docs/SAMPLES.md`](docs/SAMPLES.md) for generations. Next: Phase 5 (inference).
+> **Note:** **Phases 0–4 complete.** Both training runs finished (`minigpt-low` → `minigpt-high`) and the Azure T4 is **deallocated** to save credits. Phases 5 (inference) and 6 (serving) are complete. See [`docs/EVAL.md`](docs/EVAL.md) for results and [`docs/SAMPLES.md`](docs/SAMPLES.md) for generations. Next: Phase 7 (packaging + OSS polish).
 
 ```bash
 # Clone
@@ -76,11 +76,11 @@ Full Azure steps: [`docs/PHASE1_RUNBOOK.md`](docs/PHASE1_RUNBOOK.md). Dataset li
 | Phase 1 — Data Pipeline | 10 | 10 | ✅ Done |
 | Phase 2 — Model Architecture | 8 | 8 | ✅ Done |
 | Phase 3 — Training Engine | 9 | 9 | ✅ Done |
-| Phase 4 — Training Runs | 9 | 8 | ✅ Trained + diagnosed (4.9 retrain deferred on budget — Phase 5 proceeds) |
-| Phase 5 — Inference & Generation | 3 | 1 | 🔄 5.1 generation core done (KV-cache, streaming, stop_strings) |
-| Phase 6 — Serving (OpenAI + Ollama) | 7 | 0 | ⏳ Pending |
-| Phase 7 — Packaging & OSS Polish | 10 | 0 | ⏳ Pending |
-| **Total** | **64** | **48** | |
+| Phase 4 — Training Runs | 9 | 9 | ✅ Trained + diagnosed (4.9 deferred on budget; Phase 5 proceeds) |
+| Phase 5 — Inference & Generation | 5 | 5 | ✅ 5.1 generation core (KV-cache, streaming, stop_strings)<br>5.2 chat REPL (multi-turn, slash commands)<br>5.3 sampling diagnostics (on_token callback, entropy tracking, n-gram repeat detection)<br>5.4 serving infra (loader + OpenAI routes + Ollama routes + unified server)<br>5.5 auth + rate limiting |
+| Phase 6 — Serving (OpenAI + Ollama) | 7 | 7 | ✅ 6.1 shared loader<br>6.2 OpenAI routes<br>6.3 Ollama routes<br>6.4 unified server<br>6.5 auth + rate limiting<br>6.6 streaming correctness tests<br>6.7 cross-client compatibility |
+| Phase 7 — Packaging & OSS Polish | 10 | 2 | 🟡 Dockerfile + compose (in progress)<br>🟡 MODEL_CARD.md + CONTRIBUTING.md + LICENSE (pending) |
+| **Total** | **64** | **55** | |
 
 ### Phase 0 — Foundation & Infra (✅ Complete)
 
