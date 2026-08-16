@@ -75,8 +75,8 @@ class ChatCompletionRequest:
         self.seed = seed
 
     @staticmethod
-    def from_fastapi_request(req: Request) -> "ChatCompletionRequest":
-        payload = payload = req.json()
+    async def from_fastapi_request(req: Request) -> "ChatCompletionRequest":
+        payload = await req.json()
         # Parse into our minimal types
         msgs = [ChatMessage(**m) for m in payload.get("messages", [])]
         return ChatCompletionRequest(
@@ -277,3 +277,61 @@ async def chat_completions(request: Request) -> Response:
             return JSONResponse(content=response.model_dump())
 
         return await run_and_return()
+
+
+@router.get("/models")
+async def list_models() -> JSONResponse:
+    """``GET /v1/models`` — List available OpenAI-compatible models."""
+    now = int(__import__("time").time())
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": [
+                {
+                    "id": "minigpt-high",
+                    "object": "model",
+                    "created": now,
+                    "owned_by": "minigpt",
+                },
+                {
+                    "id": "minigpt-low",
+                    "object": "model",
+                    "created": now,
+                    "owned_by": "minigpt",
+                },
+                {
+                    "id": "minigpt",
+                    "object": "model",
+                    "created": now,
+                    "owned_by": "minigpt",
+                },
+            ],
+        }
+    )
+
+
+@router.post("/completions", response_model=None)
+async def legacy_completions(request: Request) -> Response:
+    """``POST /v1/completions`` — Legacy single-prompt completion endpoint."""
+    body = await request.json()
+    prompt = body.get("prompt", "")
+    # Re-route to chat format
+    req_body = {
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": body.get("temperature", 0.8),
+        "top_p": body.get("top_p", None),
+        "top_k": body.get("top_k", None),
+        "stream": body.get("stream", False),
+        "stop": body.get("stop", []),
+        "max_completion_tokens": body.get("max_tokens", 128),
+        "seed": body.get("seed", None),
+    }
+
+    # Simulate Request object with json method
+    class MockRequest:
+        def __init__(self, data: dict):
+            self._data = data
+        async def json(self) -> dict:
+            return self._data
+
+    return await chat_completions(cast(Request, MockRequest(req_body)))
