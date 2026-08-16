@@ -1,5 +1,12 @@
 # minigpt-high — larger FINAL model (~26M params)
 # Train: TinyStories + WikiText + FineWeb (500M), ~100k steps, target val PPL ≤ 18
+#
+# Hparams updated 2026-08-16 (Phase 4.8): promoted winning probe-2-hparam config.
+# Probe-2 (dropout 0.0, lr 1e-3, wd 0.05, warmup 500/5k) beat probe-1 on both
+# train loss (4.06 vs 4.29 @5k) and full-val PPL (207.2 vs 256.8 @5k). warmup
+# scaled from 500 (10% of 5k) to 10000 (10% of 100k) for the higher 2x LR.
+# Previous run (dropout 0.1, lr 5e-4, wd 0.1, warmup 2000) reached val PPL 111.4
+# @100k; these settings should beat that comfortably.
 name: minigpt-high
 
 model:
@@ -8,7 +15,7 @@ model:
   hidden_size: 384
   num_heads: 6
   max_position_embeddings: 1024
-  dropout: 0.1
+  dropout: 0.0
   rope_theta: 10000.0
   tie_weights: true
 
@@ -18,11 +25,11 @@ training:
   per_device_batch: 4
   grad_accum: 16
   max_steps: 100000
-  lr: 5.0e-4
-  weight_decay: 0.1
+  lr: 1.0e-3
+  weight_decay: 0.05
   beta1: 0.9
   beta2: 0.95
-  warmup_steps: 2000
+  warmup_steps: 10000
   min_lr_ratio: 0.1
   eval_every: 2000
   ckpt_every: 2000

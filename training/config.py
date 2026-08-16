@@ -35,6 +35,10 @@ class TrainingConfig:
     num_workers: int = 2
     train_shards: list[str] = field(default_factory=lambda: ["tinystories.bin"])
     val_shard: str = "val.bin"
+    # None → evaluate over the ENTIRE val shard (full-val); an int caps the batch
+    # count. Phase 4 runs hard-coded 50 (a ~3.5% prefix slice); full-val is the
+    # correct default for apples-to-apples comparison (see docs/EVAL.md).
+    eval_max_batches: int | None = None
 
     def __post_init__(self) -> None:
         if self.context_length < 1:
@@ -95,6 +99,9 @@ def load_train_config(path: Path | str) -> tuple[ModelConfig, TrainingConfig]:
         num_workers=int(t_raw.get("num_workers", 2)),
         train_shards=list(t_raw.get("train_shards", ["tinystories.bin"])),
         val_shard=str(t_raw.get("val_shard", "val.bin")),
+        eval_max_batches=(
+            int(t_raw["eval_max_batches"]) if t_raw.get("eval_max_batches") is not None else None
+        ),
     )
     if train_cfg.context_length > model_cfg.max_position_embeddings:
         raise ValueError(

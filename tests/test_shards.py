@@ -11,6 +11,7 @@ from minigpt_llm.data.shards import (
     append_token_ids,
     load_meta,
     save_meta,
+    split_tinystories_val,
     split_wikitext_val,
     tokenize_text_file,
     write_token_ids,
@@ -62,3 +63,20 @@ def test_split_wikitext_val(tmp_path: Path) -> None:
     assert val.tolist() == list(range(95, 100))
     meta = load_meta(paths.meta_pkl)
     assert meta["val"]["tokens"] == 5
+
+
+def test_split_tinystories_val(tmp_path: Path) -> None:
+    paths = DataPaths(tmp_path)
+    paths.ensure_dirs()
+    ids = list(range(1000))
+    write_token_ids(paths.tinystories_bin, ids, force=True)
+    stats = split_tinystories_val(paths, train_frac=0.95, force=True)
+    assert stats["train_tokens"] == 950
+    assert stats["val_tokens"] == 50
+    train = np.fromfile(paths.tinystories_bin, dtype=np.int32)
+    val = np.fromfile(paths.tinystories_val_bin, dtype=np.int32)
+    assert train.tolist() == list(range(950))
+    assert val.tolist() == list(range(950, 1000))
+    meta = load_meta(paths.meta_pkl)
+    assert meta["tinystories"]["tokens"] == 950
+    assert meta["tinystories_val"]["tokens"] == 50

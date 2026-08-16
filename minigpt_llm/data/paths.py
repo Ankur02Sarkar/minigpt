@@ -54,6 +54,10 @@ class DataPaths:
         return self.tokenized / "tinystories.bin"
 
     @property
+    def tinystories_val_bin(self) -> Path:
+        return self.tokenized / "tinystories_val.bin"
+
+    @property
     def wikitext_bin(self) -> Path:
         return self.tokenized / "wikitext.bin"
 

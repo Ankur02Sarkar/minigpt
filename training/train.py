@@ -44,6 +44,7 @@ class TrainArgs(BaseModel):
     device: str = "auto"
     per_device_batch: int | None = None
     grad_accum: int | None = None
+    eval_max_batches: int | None = None
 
     @field_validator("config", "data_dir", "out_dir", mode="before")
     @classmethod
@@ -85,6 +86,8 @@ def _apply_cli_overrides(train_cfg: TrainingConfig, args: TrainArgs) -> Training
         data["per_device_batch"] = args.per_device_batch
     if args.grad_accum is not None:
         data["grad_accum"] = args.grad_accum
+    if args.eval_max_batches is not None:
+        data["eval_max_batches"] = args.eval_max_batches
     return TrainingConfig(**data)
 
 
@@ -256,7 +259,7 @@ def run_training(args: TrainArgs) -> dict[str, Any]:
                 val_path,
                 context_length=train_cfg.context_length,
                 batch_size=train_cfg.per_device_batch,
-                max_batches=50,
+                max_batches=train_cfg.eval_max_batches,
                 device=device,
             )
             logger.log_val(step, metrics)
@@ -323,6 +326,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     parser.add_argument("--per-device-batch", type=int, default=None)
     parser.add_argument("--grad-accum", type=int, default=None)
+    parser.add_argument(
+        "--eval-max-batches",
+        type=int,
+        default=None,
+        help="cap eval to N batches (default: full val shard)",
+    )
     ns = parser.parse_args(argv)
 
     try:
@@ -338,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             device=ns.device,
             per_device_batch=ns.per_device_batch,
             grad_accum=ns.grad_accum,
+            eval_max_batches=ns.eval_max_batches,
         )
         run_training(args)
     except Exception:
