@@ -25,6 +25,7 @@ from typing import Any
 
 import torch
 
+from inference.diagnostics import DiagnosticAccumulator, on_token_default
 from inference.generate import generate, load_model
 from minigpt_llm.tokenizer.load import load_tokenizer
 
@@ -59,6 +60,10 @@ class ChatSession:
     it into a single prompt string with role markers, truncated from the left
     if it exceeds the model's ``max_position_embeddings`` (so the most recent
     turns fit).
+
+    Attributes:
+        on_token: optional per-step callback ``(token_id, piece, entropy, top5)``
+            forwarded to ``generate()``. Useful for Phase 5.3 sampling diagnostics.
     """
 
     model: torch.nn.Module
@@ -67,6 +72,7 @@ class ChatSession:
     max_position_embeddings: int = 1024
     history: list[tuple[str, str]] = field(default_factory=list)
     params: ChatParams = field(default_factory=ChatParams)
+    on_token: Any = None  # callable(token_id, piece, entropy, top5) or None
 
     def reset(self) -> None:
         """Clear the history (the system prompt is preserved)."""
@@ -130,6 +136,7 @@ class ChatSession:
             stream=True,
             device=next(self.model.parameters()).device,
             seed=self.params.seed,
+            on_token=self.on_token,
         )
         for piece in gen:
             pieces.append(piece)
@@ -218,6 +225,9 @@ def main() -> None:
     parser.add_argument("--top-p", type=float, default=None)
     parser.add_argument("--system", type=str, default=_SYSTEM_DEFAULT)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--diagnostics", action="store_true", help="show per-token entropy + n-gram repeat warnings"
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -237,6 +247,15 @@ def main() -> None:
             seed=args.seed,
         ),
     )
+    if args.diagnostics:
+        acc = DiagnosticAccumulator(n_gram=3, entropy_threshold=4.0)
+        session.on_token = lambda tid, piece, ent, top5: on_token_default(
+            tid,
+            piece,
+            ent,
+            top5,
+            accumulator=acc,
+        )
     print(
         f"# checkpoint={args.checkpoint.name} step={step} "
         f"ctx={max_pos} temp={args.temperature} top_k={args.top_k}\n",
