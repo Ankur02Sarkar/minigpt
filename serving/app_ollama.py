@@ -16,7 +16,7 @@ import threading
 from typing import Any, AsyncGenerator, cast
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import torch
 
 from serving.loader import get_model, get_tokenizer, get_config
@@ -28,8 +28,8 @@ router = APIRouter(prefix="/api", tags=["ollama"])
 # ----------------------------------------------------------------------------
 
 def _sse_frame(data: dict) -> bytes:
-    """Encode a dict as NDJSON (one JSON object + newline)."""
-    return json.dumps(data, ensure_ascii=False) + "\n"
+    """Encode a dict as NDJSON (one JSON object + newline) in bytes."""
+    return (json.dumps(data, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 # ----------------------------------------------------------------------------
@@ -84,180 +84,129 @@ class ChatRequest:
 # Route: POST /api/generate
 # ----------------------------------------------------------------------------
 
-@router.post("/generate")
-async def ollama_generate(request: Request) -> StreamingResponse:
-    """``POST /api/generate`` — Ollama text generation.
-
-    NDJSON streaming. Each line is a JSON dict with fields like:
-    - ``response``: the generated text token(s)
-    - ``done``: whether generation is complete
-    - ``done_reason``: e.g. ``"stop"``, ``"length"``
-    - ``context``: updated keyframe context (optional)
-    - ``model``: the model name
-    - ``timestamp``: ISO timestamp (optional)
-    """
+@router.post("/generate", response_model=None)
+async def ollama_generate(request: Request) -> Response:
+    """``POST /api/generate`` — Ollama text generation."""
     payload = await request.json()
-    # Minimal parsing
     prompt = payload.get("prompt", "")
     stream = payload.get("stream", True)
-    options = payload.get("options", {})
     system = payload.get("system", "")
-    context = payload.get("context", [])
 
-    # Build the same role-marker context the chat REPL uses
-    # System: {system}\nUser: {prompt}\nAssistant:
-    ctx_lines: list[str] = [f"System: {system}", f"User: {prompt}", "Assistant:"]
+    ctx_lines: list[str] = []
+    if system:
+        ctx_lines.append(f"System: {system}")
+    ctx_lines.extend([f"User: {prompt}", "Assistant:"])
     context_str = "\n".join(ctx_lines)
 
     from serving.loader import get_model as _get_model, get_tokenizer as _get_tokenizer
+    from inference.generate import generate as _generate
 
     model = _get_model()
     tokenizer = _get_tokenizer()
 
-    enc = tokenizer.encode(context_str)
-    input_ids = torch.tensor([enc.ids], dtype=torch.long)
-
-    past: Any = None
-    generated_ids: list[int] = list(enc.ids)
-    decoded_context = context_str
-
-    async def token_stream() -> AsyncGenerator[bytes, None]:
-        nonlocal past, generated_ids, decoded_context
-
-        for _ in range(128):  # max_new_tokens guard
-            if past is None:
-                out = model.forward(input_ids, use_cache=True)
-            else:
-                out = model.forward(input_ids[:, -1:], past_key_values=past, use_cache=True)
-            past = out.past_key_values
-            logits = out.logits[:, -1, :]  # (1, V)
-
-            # greedy decode (temperature <= 0)
-            next_id = int(torch.argmax(logits, dim=-1).item())
-            generated_ids.append(next_id)
-
-            full_text = tokenizer.decode(generated_ids)
-            new_text = full_text[len(decoded_context):]
-
-            if not new_text:
-                new_text = tokenizer.decode([next_id])
-
-            decoded_context = full_text
-
-            # NDJSON frame
+    if stream:
+        async def token_stream() -> AsyncGenerator[bytes, None]:
+            for piece in _generate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=context_str,
+                max_new_tokens=128,
+                stream=True,
+            ):
+                yield _sse_frame({
+                    "response": piece,
+                    "done": False,
+                    "model": payload.get("model", "minigpt"),
+                })
             yield _sse_frame({
-                "response": new_text,
-                "done": False,
+                "response": "",
+                "done": True,
+                "done_reason": "stop",
                 "model": payload.get("model", "minigpt"),
             })
 
-            if new_text.strip() == "" or _import_os("random").random() < 0.01:
-                # Simulate eos after some tokens for demo purposes
-                yield _sse_frame({
-                    "response": new_text,
-                    "done": True,
-                    "done_reason": "length",
-                    "model": payload.get("model", "minigpt"),
-                })
-                return
-
-    if stream:
         return StreamingResponse(token_stream(), media_type="application/x-ndjson")
     else:
-        # non-stream: block until done
-        async def block_until_done():
-            async for chunk in token_stream():
-                pass
-            return {"response": decoded_context, "done": True, "done_reason": "length", "model": payload.get("model", "minigpt")}
-        return StreamingResponse(block_until_done(), media_type="application/x-ndjson")
+        text = _generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=context_str,
+            max_new_tokens=128,
+            stream=False,
+        )
+        return JSONResponse(
+            content={
+                "response": str(text),
+                "done": True,
+                "done_reason": "stop",
+                "model": payload.get("model", "minigpt"),
+            }
+        )
 
 
 # ----------------------------------------------------------------------------
 # Route: POST /api/chat
 # ----------------------------------------------------------------------------
 
-@router.post("/chat")
-async def ollama_chat(request: Request) -> StreamingResponse:
+@router.post("/chat", response_model=None)
+async def ollama_chat(request: Request) -> Response:
     """``POST /api/chat`` — Ollama chat (multi-turn, NDJSON streaming)."""
-
     payload = await request.json()
     messages = payload.get("messages", [])
     stream = payload.get("stream", True)
 
-    # Build context from the last user/assistant turn pair,
-    # prepended by system prompt if any.
     system = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
-    # Take the last user message and its preceding assistant reply if any
-    last_user = ""
-    last_assistant = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            last_user = m.get("content", "")
-            break
-    # There may be an assistant reply after the user; capture it
-    for m in reversed(messages):
-        if m.get("role") == "assistant":
-            last_assistant = m.get("content", "")
-            break
+    user_texts: list[str] = [m.get("content", "") for m in messages if m.get("role") == "user"]
+    assistant_texts: list[str] = [m.get("content", "") for m in messages if m.get("role") == "assistant"]
 
-    ctx_lines: list[str] = [f"System: {system}", f"User: {last_user}", f"Assistant: {last_assistant}", "Assistant:"]
-    context_str = "\n".join(ctx_lines)
+    context_lines: list[str] = [f"System: {system}"]
+    for u, a in zip(user_texts, assistant_texts):
+        context_lines.append(f"User: {u}")
+        context_lines.append(f"Assistant: {a}")
+    if len(user_texts) > len(assistant_texts):
+        context_lines.append(f"User: {user_texts[-1]}")
+    context_lines.append("Assistant:")
+    context_str = "\n".join(context_lines)
 
     from serving.loader import get_model as _get_model, get_tokenizer as _get_tokenizer
+    from inference.generate import generate as _generate
 
     model = _get_model()
     tokenizer = _get_tokenizer()
 
-    enc = tokenizer.encode(context_str)
-    input_ids = torch.tensor([enc.ids], dtype=torch.long)
-
-    past: Any = None
-    generated_ids: list[int] = list(enc.ids)
-    decoded_context = context_str
-
-    async def chat_stream() -> AsyncGenerator[bytes, None]:
-        nonlocal past, generated_ids, decoded_context
-
-        for _ in range(128):
-            if past is None:
-                out = model.forward(input_ids, use_cache=True)
-            else:
-                out = model.forward(input_ids[:, -1:], past_key_values=past, use_cache=True)
-            past = out.past_key_values
-            logits = out.logits[:, -1, :]
-
-            next_id = int(torch.argmax(logits, dim=-1).item())
-            generated_ids.append(next_id)
-
-            full_text = tokenizer.decode(generated_ids)
-            new_text = full_text[len(decoded_context):]
-
-            if not new_text:
-                new_text = tokenizer.decode([next_id])
-
-            decoded_context = full_text
-
+    if stream:
+        async def chat_stream() -> AsyncGenerator[bytes, None]:
+            for piece in _generate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=context_str,
+                max_new_tokens=128,
+                stream=True,
+            ):
+                yield _sse_frame({
+                    "message": {"role": "assistant", "content": piece},
+                    "done": False,
+                })
             yield _sse_frame({
-                "message": {"role": "assistant", "content": new_text},
-                "done": False,
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
             })
 
-            # simple eos simulation
-            if new_text.strip().endswith(".") or new_text.strip().endswith("!\n"):
-                yield _sse_frame({
-                    "message": {"role": "assistant", "content": new_text},
-                    "done": True,
-                })
-                return
-
-    if stream:
         return StreamingResponse(chat_stream(), media_type="application/x-ndjson")
     else:
-        async def block():
-            async for chunk in chat_stream():
-                pass
-            return {"message": {"role": "assistant", "content": decoded_context}, "done": True}
-        return StreamingResponse(block(), media_type="application/x-ndjson")
+        text = _generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=context_str,
+            max_new_tokens=128,
+            stream=False,
+        )
+        return JSONResponse(
+            content={
+                "message": {"role": "assistant", "content": str(text)},
+                "done": True,
+            }
+        )
 
 
 # ----------------------------------------------------------------------------

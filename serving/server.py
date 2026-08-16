@@ -69,15 +69,14 @@ from typing import cast
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Automatically initialize model & tokenizer from environment if provided
-    model_path = environ.get("MINIGPT_MODEL_PATH") or environ.get("CHECKPOINT_PATH")
-    tokenizer_dir = environ.get("MINIGPT_TOKENIZER_DIR") or environ.get("TOKENIZER_DIR")
-    if model_path and tokenizer_dir:
-        try:
-            initialize(model_path, tokenizer_dir)
-        except Exception as e:
-            # Allow server to start so /health or debugging still works
-            pass
+    # Automatically initialize model & tokenizer from environment (or default fallback)
+    model_path = environ.get("MINIGPT_MODEL_PATH") or environ.get("CHECKPOINT_PATH") or "/opt/minigpt_llm/checkpoints/minigpt-high/best.pt"
+    tokenizer_dir = environ.get("MINIGPT_TOKENIZER_DIR") or environ.get("TOKENIZER_DIR") or "/opt/minigpt_llm/tokenizer"
+    try:
+        initialize(model_path, tokenizer_dir)
+    except Exception as e:
+        # Allow server to start so /health or debugging still works
+        pass
     yield
 
 

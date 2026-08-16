@@ -128,6 +128,14 @@ def generate(
     ids = enc.ids
     eos = eos_token_id(tokenizer)
 
+    # Respect model context window if available
+    max_ctx = getattr(getattr(model, "config", None), "max_position_embeddings", 1024)
+    if len(ids) >= max_ctx:
+        ids = ids[-(max_ctx - 1):]
+    allowed_new_tokens = min(max_new_tokens, max_ctx - len(ids))
+    if allowed_new_tokens < 1:
+        return "" if not stream else iter("")
+
     generator: torch.Generator | None = None
     if seed is not None:
         generator = torch.Generator(device=dev)
@@ -149,7 +157,7 @@ def generate(
         Stop strings are matched against the *generated* text only (not the prompt),
         matching OpenAI API semantics.
         """
-        nonlocal past, decoded_new
+        nonlocal past, decoded_new, input_ids
 
         if past is None:
             out = model.forward(input_ids, use_cache=True)
@@ -167,6 +175,7 @@ def generate(
         )  # (B, 1)
         next_id_int = int(next_id.item())
         generated_ids.append(next_id_int)
+        input_ids = next_id
 
         # Full decode (prompt + new); ByteLevel BPE needs surrounding context.
         full_text = tokenizer.decode(generated_ids)
@@ -198,14 +207,14 @@ def generate(
         return (piece, stopped)
 
     def _run() -> str:
-        for _ in range(max_new_tokens):
+        for _ in range(allowed_new_tokens):
             _, stopped = _step()
             if stopped:
                 break
         return decoded_new
 
     def _gen() -> Iterator[str]:
-        for _ in range(max_new_tokens):
+        for _ in range(allowed_new_tokens):
             piece, stopped = _step()
             if piece:
                 yield piece

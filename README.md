@@ -231,6 +231,12 @@ Both `best.pt` checkpoints exist — the T4 has been **deallocated**.
 
 \* minigpt-low trained on TinyStories but was evaluated on the WikiText val shard — a cross-domain target it could never hit. Full breakdown, val-loss curves, cost record, and Phase 4.8 diagnosis + probe results in [`docs/EVAL.md`](docs/EVAL.md); verbatim generations in [`docs/SAMPLES.md`](docs/SAMPLES.md).
 
+| Documentation | Purpose |
+|---|---|
+| [`docs/API.md`](docs/API.md) | Complete API reference for OpenAI & Ollama endpoints with runnable `curl` examples |
+| [`docs/EVAL.md`](docs/EVAL.md) | Evaluation results for all runs (PPL, throughput, loss curves, probe comparisons) |
+| [`docs/SAMPLES.md`](docs/SAMPLES.md) | Qualitative generation samples across checkpoints, prompts, and temperatures |
+
 Both runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
 
 **Phase 4 — Training Runs (✅ Complete):** Both training runs finished exit 0 under the systemd queue (`phase: both_complete`), then the T4 was deallocated to preserve credits. Checkpoints persist on the OS disk; `/data` intact.
