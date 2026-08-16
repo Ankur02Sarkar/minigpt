@@ -270,10 +270,10 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
   - `stream=True` yields incremental pieces; `stream=False` returns the full generated string (prompt excluded, matches `choices[0].text`).
   - Mirrors `model._sample_next` semantics (greedy/top_k/top_p); `seed` makes sampling reproducible without touching global RNG.
   - 13 CPU tests in `tests/test_inference_generate.py` (tiny BPE + 2-layer GPT fixture); 47+ existing tests unaffected.
-- **5.2 Interactive chat loop (`inference/chat.py`)** `[ ]`
+- **5.2 Interactive chat loop (`inference/chat.py`)** `[x]`
   - Readline-based REPL; system prompt configurable; multi-turn history in memory.
   - `/reset`, `/system`, `/temp`, `/tokens` slash commands.
-- **5.3 Sampling diagnostics** `[ ]`
+- **5.3 Sampling diagnostics** `[x]`
   - Log per-token top-5 distribution entropy for the first 20 generations.
   - Detect repetition loops (n-gram repeat in last 64 tokens) and warn.
 
