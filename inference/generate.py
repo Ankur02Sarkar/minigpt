@@ -111,8 +111,10 @@ def generate(
             (does not touch the global RNG state).
 
     Returns:
-        Full decoded string (``stream=False``) or an iterator of incremental
-        pieces (``stream=True``).
+        Generated text only (excludes the prompt) — matching OpenAI API
+        semantics (``choices[0].text`` is the model's continuation, not
+        prompt+continuation). ``stream=False`` returns the full generated
+        string; ``stream=True`` returns an iterator of incremental pieces.
     """
     if max_new_tokens < 1:
         return "" if not stream else iter("")

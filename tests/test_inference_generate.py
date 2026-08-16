@@ -65,10 +65,14 @@ def tiny_setup() -> tuple[GPT, ByteLevelBPETokenizer, tempfile.TemporaryDirector
 
 
 def test_generate_nonstream_returns_str(tiny_setup) -> None:
+    """Non-stream returns a string of at most max_new_tokens decoded tokens (prompt excluded)."""
     model, tok, _ = tiny_setup
-    out = generate(model, tok, "the", max_new_tokens=5, temperature=0.0, stream=False, device="cpu")
+    n = 5
+    out = generate(model, tok, "the", max_new_tokens=n, temperature=0.0, stream=False, device="cpu")
     assert isinstance(out, str)
-    assert out.startswith("the")  # prompt is decoded back as prefix
+    # Generated-only (prompt excluded); length is bounded by the token budget.
+    prompt_decoded = tok.decode(tok.encode("the").ids)
+    assert not out.startswith(prompt_decoded)
 
 
 def test_generate_greedy_deterministic(tiny_setup) -> None:
@@ -118,13 +122,17 @@ def test_generate_seed_isolates_global_rng(tiny_setup) -> None:
 
 
 def test_generate_stream_yields_pieces(tiny_setup) -> None:
-    """stream=True returns an iterator whose concatenated pieces equal the full string."""
+    """stream=True returns an iterator whose concatenated pieces equal the non-stream output."""
     model, tok, _ = tiny_setup
-    gen = generate(model, tok, "the", max_new_tokens=5, temperature=0.0, stream=True, device="cpu")
+    n = 5
+    full = generate(
+        model, tok, "the", max_new_tokens=n, temperature=0.0, stream=False, device="cpu"
+    )
+    gen = generate(model, tok, "the", max_new_tokens=n, temperature=0.0, stream=True, device="cpu")
     pieces = list(gen)
     assert len(pieces) >= 1
     joined = "".join(pieces)
-    assert joined.startswith("the")
+    assert joined == full
 
 
 def test_generate_stream_piece_count_matches_token_count(tiny_setup) -> None:
