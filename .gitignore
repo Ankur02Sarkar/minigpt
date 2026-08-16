@@ -48,3 +48,6 @@ events.out.tfevent.*
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Demo
+demo/
