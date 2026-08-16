@@ -91,7 +91,7 @@ class ChatSession:
         lines: list[str] = [f"{_SYSTEM_MARKER} {self.system}"]
         for role, text in self.history:
             lines.append(f"{_role_marker(role)} {text}")
-        lines.append(f"{_ASSISTANT_MARKER}:")  # trailing cue, no leading space
+        lines.append(_ASSISTANT_MARKER)  # trailing cue (marker already includes ':')
         full = _TURN_SEP.join(lines)
         # Truncate from the left (drop oldest turns) if too long. We always keep
         # the system line + the trailing marker line.
@@ -100,7 +100,7 @@ class ChatSession:
             lines = [f"{_SYSTEM_MARKER} {self.system}"]
             for role, text in self.history:
                 lines.append(f"{_role_marker(role)} {text}")
-            lines.append(f"{_ASSISTANT_MARKER}:")
+            lines.append(_ASSISTANT_MARKER)
             full = _TURN_SEP.join(lines)
         return full
 
