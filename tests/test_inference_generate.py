@@ -2,61 +2,15 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
-
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from tokenizers import ByteLevelBPETokenizer  # noqa: E402
-
 from inference.generate import generate  # noqa: E402
-from minigpt_llm.model.config import ModelConfig  # noqa: E402
-from minigpt_llm.model.model import GPT  # noqa: E402
-from minigpt_llm.tokenizer.load import eos_token_id, load_tokenizer  # noqa: E402
+from minigpt_llm.tokenizer.load import eos_token_id  # noqa: E402
 
-# --------------------------------------------------------------------------- #
-# Fixtures — tiny model (vocab < tokenizer size won't work, so size them together)
-# --------------------------------------------------------------------------- #
-
-_TINY_CORPUS = [
-    "the quick brown fox jumps over the lazy dog",
-    "once upon a time there was a small language model",
-    "two roads diverged in a yellow wood and i",
-    "the model the model the model again and again",
-    "stop here and then keep going after the end",
-]
-
-
-@pytest.fixture(scope="module")
-def tiny_setup() -> tuple[GPT, ByteLevelBPETokenizer, tempfile.TemporaryDirectory]:
-    """Train a tiny BPE tokenizer, instantiate a tiny GPT sized to match it."""
-    tmp = tempfile.TemporaryDirectory()
-    d = tmp.name
-    src = os.path.join(d, "corpus.txt")
-    with open(src, "w") as f:
-        f.write("\n".join(_TINY_CORPUS))
-    tok = ByteLevelBPETokenizer()
-    tok.train(
-        [src], vocab_size=128, min_frequency=1, special_tokens=["<pad>", "<s>", "</s>", "<unk>"]
-    )
-    tok.save_model(d)
-    tokenizer = load_tokenizer(d)
-    vocab_size = tokenizer.get_vocab_size()
-    torch.manual_seed(42)
-    cfg = ModelConfig(
-        vocab_size=vocab_size,
-        num_layers=2,
-        hidden_size=64,
-        num_heads=4,
-        max_position_embeddings=64,
-        dropout=0.0,
-        tie_weights=True,
-    )
-    model = GPT(cfg)
-    model.eval()
-    return model, tokenizer, tmp
+# ``tiny_setup`` is provided by tests/conftest.py (session-scoped tiny BPE
+# tokenizer + 2-layer GPT) so chat/diagnostics tests can reuse the same model.
 
 
 # --------------------------------------------------------------------------- #
