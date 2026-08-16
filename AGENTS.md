@@ -318,36 +318,36 @@ The project is divided into **7 major phases** and **~35 minor phases**. Status 
 
 ---
 
-| Phase 7 — Packaging & OSS Polish | 10 | 9 | 🟡 README final pass pending (shields.io badges, about-me JSON); all other 7.1-7.3, 7.5-7.9 done; Phase 7 complete |*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
+| Phase 7 — Packaging & OSS Polish | 10 | 10 | ✅ All 10 minor phases complete (7.1 Dockerfile → 7.10 v0.1.0 release); exit criteria met |*Goal: anyone with Docker can run the model; anyone with a browser can read the README and know exactly what to do.*
 
-- **7.1 Production Dockerfile (`docker/Dockerfile`)** `[ ]`
+- **7.1 Production Dockerfile (`docker/Dockerfile`)** `[x]`
   - Multi-stage: build (with dev deps, compile wheels) → runtime (slim base).
   - `HEALTHCHECK` calling `/health`.
   - Labels: `org.opencontainers.image.source`, `image.version`, `image.revision`.
-- **7.2 docker-compose for local dev (`docker-compose.yml`)** `[ ]`
+- **7.2 docker-compose for local dev (`docker-compose.yml`)** `[x]`
   - Service `train` (volume mount `/data`, GPU passthrough), service `serve` (port 8080).
   - `.env.example` with every var documented.
-- **7.3 Model card (`MODEL_CARD.md`)** `[ ]`
+- **7.3 Model card (`MODEL_CARD.md`)** `[x]`
   - Intended use, out-of-scope use, training data summary, eval results, limitations, safety considerations.
   - Cite the data sources and respect their licenses.
-- **7.4 `README.md` — final, public-facing pass** `[ ]`
+- **7.4 `README.md` — final, public-facing pass** `[x]`
   - Badges, hero GIF / screenshot, quickstart, install, run, API examples, training, contributing, license, citation.
   - JS-object "About Me" persona block (per user style).
   - Every `curl` example copy-paste tested against the running image.
-- **7.5 `CONTRIBUTING.md`** `[ ]`
+- **7.5 `CONTRIBUTING.md`** `[x]`
   - Dev setup, pre-commit, PR template, code-of-conduct reference.
-- **7.6 `LICENSE`** `[ ]`
+- **7.6 `LICENSE`** `[x]`
   - Apache-2.0 (matches `img.shields.io` defaults; permissive for OSS).
-- **7.7 `CHANGELOG.md`** `[ ]`
+- **7.7 `CHANGELOG.md`** `[x]`
   - Keep a Changelog format; one entry per release; semver.
-- **7.8 Examples & notebooks (`examples/`)** `[ ]`
+- **7.8 Examples & notebooks (`examples/`)** `[x]`
   - `examples/quickstart.ipynb` — load checkpoint, generate 100 tokens.
   - `examples/serve_locally.ipynb` — run the Docker image, hit endpoints.
-- **7.9 OSS hygiene** `[ ]`
+- **7.9 OSS hygiene** `[x]`
   - `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`.
   - `SECURITY.md` with disclosure policy.
   - `CODEOWNERS` mapping `model/`, `training/`, `serving/` to the maintainer.
-- **7.10 First release (v0.1.0)** `[ ]`
+- **7.10 First release (v0.1.0)** `[x]`
   - Tag, GitHub release with notes, Docker image pushed to `ghcr.io/<org>/minigpt_llm:0.1.0`.
 
 **Exit criteria:** A stranger can `docker run ghcr.io/<org>/minigpt_llm:0.1.0` and chat with the model within 5 minutes, guided only by `README.md`.
